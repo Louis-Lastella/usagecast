@@ -98,10 +98,13 @@ details.range span{color:var(--faint)}
 .hero .trend{grid-column:1/-1;margin-top:14px;padding-top:16px;border-top:1px solid var(--line)}
 svg.spark{width:100%;height:72px;display:block}
 svg.spark polyline{fill:none;stroke-width:2;vector-effect:non-scaling-stroke;stroke-linejoin:round;stroke-linecap:round}
-svg.spark .w{stroke:var(--acc)}svg.spark .f{stroke:var(--soft);stroke-width:1.5}
+svg.spark .w{stroke:var(--acc)}svg.spark .fcl{stroke:var(--acc);stroke-dasharray:4 4;opacity:.75}svg.spark .cap{stroke:var(--fill);stroke-width:1;vector-effect:non-scaling-stroke;opacity:.6}
 .axis{display:flex;justify-content:space-between;gap:10px;color:var(--faint);font-size:12px;margin-top:6px}
 .dot{display:inline-block;width:8px;height:8px;border-radius:4px;margin:0 5px 0 12px}
-.dot.f{background:var(--soft)}.dot.n{background:var(--fill)}
+.dot.n{background:var(--fill)}
+.dash{display:inline-block;width:14px;margin:0 6px 0 12px;vertical-align:middle;border-top:2px dashed var(--acc)}.dash.cap{border-top:1px solid var(--fill)}
+.trend .lg{margin:6px 0 0;font-size:12px;color:var(--faint)}.trend .lg .dot,.trend .lg .dash{margin-left:0}
+.hero strong.hot{color:var(--acc-ink)}
 /* disclosure for the longer explanations (limit card, ranked bars) */
 details.more{margin-top:12px}
 details.more>summary,details.bar>summary,details.adv>summary{list-style:none;cursor:pointer}
@@ -143,12 +146,15 @@ details.bar>.why{padding:2px 0 10px;max-width:62ch}div.bar>.why{margin-top:7px;m
 .rank b{font-weight:600;font-variant-numeric:tabular-nums;min-width:52px;text-align:right}
 /* savings tips: one quiet list instead of a card grid */
 .tips{margin-top:8px;background:var(--card);border-radius:var(--r);box-shadow:0 0 0 1px var(--line),0 1px 2px var(--shc)}
-.tip{display:grid;grid-template-columns:minmax(0,17rem) minmax(0,1fr);gap:4px 32px;padding:16px 22px}
+.tip{display:grid;grid-template-columns:minmax(0,17rem) minmax(0,1fr) auto;gap:4px 32px;padding:16px 22px}
 .tip+.tip{border-top:1px solid var(--line)}
 .tip b{font:600 14.5px/1.45 var(--display);letter-spacing:-.005em}
 .tip p{margin:0;color:var(--mute);font-size:14px;max-width:68ch}
 .tip .fix{display:block;width:fit-content;max-width:100%;margin-top:8px;color:var(--ink)}
 .tip .fix+.fix{margin-top:4px}
+.tip .gain{align-self:start;font-size:13.5px;font-weight:600;white-space:nowrap;font-variant-numeric:tabular-nums;line-height:1.55}
+.gear{display:none}
+.set h3{margin:22px 0 0;font-size:13px;font-weight:600;color:var(--mute)}.set .card>.hint+h3{margin-top:10px}
 
 /* Tables */
 .scroll{overflow-x:auto;background:var(--card);border-radius:var(--r);box-shadow:0 0 0 1px var(--line),0 1px 2px var(--shc);margin-top:10px}
@@ -273,7 +279,10 @@ aside nav a,aside nav a.on{flex:1 1 auto;flex-direction:column;justify-content:c
 aside nav a svg{width:23px;height:23px}
 aside nav a.on{color:var(--ink)}
 aside nav a:hover{background:none}
-aside nav a.end{margin-top:0}
+aside nav a.end{display:none}
+.top{position:relative}.top>div:first-child{padding-right:46px}
+.gear{display:grid;place-items:center;position:absolute;top:-8px;right:-10px;width:44px;height:44px;border-radius:10px;color:var(--mute)}.gear.on{color:var(--acc)}
+.gear svg{width:23px;height:23px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
 .seg a,.opts span{padding:10px 14px}.chips a{padding:9px 14px}details.range summary{padding:12px 14px}
 .btn,.set input:not([type=checkbox]):not([type=radio]),.set select{min-height:44px}
 main{padding:max(22px,calc(env(safe-area-inset-top) + 14px)) 16px calc(92px + env(safe-area-inset-bottom))}
@@ -290,12 +299,12 @@ h1{font-size:25px}
 .kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
 .kpi{padding:14px 16px}
 .kpi.main{grid-column:1/-1}
-.tip{grid-template-columns:minmax(0,1fr);padding:15px 18px}
+.tip{grid-template-columns:minmax(0,1fr) auto;padding:15px 18px}.tip p{grid-column:1/-1;grid-row:2}
 table{font-size:13.5px}th{white-space:normal}
-td:first-child,th:first-child{min-width:0}
+td:first-child,th:first-child{min-width:0}.titles td:first-child{width:auto}
 td:first-child,td.l{overflow-wrap:anywhere}
 th,td{padding:10px 10px}.o{display:none}
-.cal>:nth-child(-n+216){display:none}.cal{gap:2px}
+.cal>.x{display:none}.cal{gap:2px}
 .heat{gap:2px;grid-template-columns:20px repeat(24,minmax(0,1fr))}.heat i{height:auto;aspect-ratio:1;border-radius:2px}
 .search input{width:100%}.search{flex:1 1 100%}
 }

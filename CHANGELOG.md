@@ -2,6 +2,25 @@
 
 Versions follow [Semantic Versioning](https://semver.org).
 
+## 3.1.0 - 2026-10-11
+
+UX pass from a review of every page on desktop and phone.
+
+- Pace verdict has three states: "Tight" (orange) from an 85 % forecast for the week and the 5-hour window, "Too fast"
+  above 100 %. The forecast was 16-47 % off in backtests, so 99 % no longer reads "On track".
+- Overview trend shows only the current limit week, with a 100 % line and the forecast dashed up to the reset, instead
+  of seven days of 5-hour teeth without a scale.
+- Sessions: one filter row (the cron chip opens the per-job table), origin and last activity under every title, so
+  sessions with the same name can be told apart on a phone too.
+- Phones: settings moved to an icon in the header, the tab bar keeps five tabs.
+- Method texts ("What eats the most", projects, logged cache numbers) fold into "How it's calculated".
+- Savings tips: one comparable "saves ~X %" per tip, sorted by it; titles say what to do; the cache tip shows only the
+  command instead of a broken YAML snippet.
+- Settings: alerts in three groups (limits, costs, summary and quiet hours).
+- The year calendar starts at the first week with data. The models card hides with only one model, empty skill and
+  plugin tables on Details hide too.
+- Fixed "31 active days out of 30"; the average is labelled per active day.
+
 ## 3.0.2 - 2026-10-09
 
 - Tips: "Cron: ... is expensive" only for jobs that will run again. Finished one-shot jobs (a build that ran once)

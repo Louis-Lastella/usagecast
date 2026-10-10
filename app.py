@@ -829,7 +829,7 @@ def idle_sets(tools, sets, used):
 
 
 def tips(d, snap):
-    """[(weight, title, html text)], heaviest first."""
+    """[(rough saving in $, title, html text)], biggest saving first; the overview shows the saving as % of the period."""
     tot, out = d["total"] or 1, []
     p = lambda v: pct(v, tot)
     save = d["ttl_save"]
@@ -862,7 +862,7 @@ def tips(d, snap):
     if bg > 0.05 * tot:  # agent.log shows the review reads the history with its own prompt, so without cache hits
         every = ((f"{a}.{b}", config_value(a, b) or "10") for a, b in (("skills", "creation_nudge_interval"), ("memory", "nudge_interval")))
         cmd = "".join(fix("config", "set", k, 2 * int(v)) for k, v in every if v.isdigit() and int(v))   # 0 = already off
-        out.append((bg, tr("tip.review"), tr("tip.review.text", p=p(bg)) + cmd))
+        out.append((bg / 2, tr("tip.review"), tr("tip.review.text", p=p(bg)) + cmd))
     tl = sorted(((k, v) for k, v in d["comp"].items() if k.startswith("tool:")), key=lambda x: -x[1])
     if tl and tl[0][1] > 0.08 * tot:
         name = tl[0][0][5:]
@@ -1535,17 +1535,21 @@ def api_summary():
     return json.dumps(out)
 
 
+TIGHT = 85   # forecast % from which the verdict says "Tight": the backtest was 16-47 % off, so 99 % is no "On track"
+
+
 def limits_card(week_cost, split=None):
     fresh_limits()
     L, now = STATE["limits"], time.time()
     if not L:
         return f'<section class="card"><h2>{tr("lim.title")}</h2><p class="hint">{tr("lim.unavailable")}</p></section>'
-    hist, left, right = limit_history(), "", ""
+    hist, left, right, week = limit_history(), "", "", None
     lv = SET["limit_view"] == "left"
     for key, u, frac, reset, length in windows(L, now):
         start = reset - length if reset else now
         if key == "seven_day":
             fc = week_forecast(u, frac)
+            week = (start, reset, length, u, fc)
             if u >= 100:
                 txt = tr("lim.full", reset=until(reset))
             elif fc is None:
@@ -1553,7 +1557,7 @@ def limits_card(week_cost, split=None):
             elif fc > 100:
                 txt = tr("lim.week.over", full=when(start + (now - start) * 100 / u, "daytime"), reset=until(reset))
             else:
-                txt = tr("lim.week.lands", fc=tr("lim.left", p=pc(100 - fc)) if lv else pc(fc), frac=pc(frac * 100), reset=until(reset))
+                txt = tr("lim.week.tight" if fc >= TIGHT else "lim.week.lands", fc=tr("lim.left", p=pc(100 - fc)) if lv else pc(fc), frac=pc(frac * 100), reset=until(reset))
             left = (f'<div class="lbl">{tr("lim.week")}</div><div class="big">{nf(100 - u if lv else u)}<span>{tr("lim.unit.left" if lv else "lim.unit")}</span></div>'
                     f'{meter(u, frac, u >= 80 or (fc or 0) > 100, lv)}<p class="fc">{txt}</p>')
             if u < 100 and reset:
@@ -1589,7 +1593,7 @@ def limits_card(week_cost, split=None):
                 txt, hot = tr("lim.five.full_at", left=dur(fa - now), full=hm(fa), reset=until(reset)), hot or fa - now < 1800
             elif r is not None:
                 at = min(u + r * (reset - now), 100)
-                txt = tr("lim.five.enough", reset=hm(reset), at=tr("lim.left", p=pc(100 - at)) if lv else pc(at))
+                txt = tr("lim.five.tight" if at >= TIGHT else "lim.five.enough", reset=hm(reset), at=tr("lim.left", p=pc(100 - at)) if lv else pc(at))
             else:
                 txt = until(reset)
         else:
@@ -1612,13 +1616,20 @@ def limits_card(week_cost, split=None):
         right += (f'<div class="lim"><div class="row"><span>{tr("lim.extra")}</span><b>{value}</b></div>'
                   f'{meter(used / x["monthly_limit"] * 100)}<div class="why">{why}</div>{past}</div>')
     spark = ""
-    if len(hist) >= 3:
-        t0, t1 = hist[0]["t"], hist[-1]["t"]
-        line = lambda k: " ".join(f"{(h['t'] - t0) / ((t1 - t0) or 1) * 100:.2f},{100 - min(h.get(k) or 0, 100):.1f}" for h in hist)
-        spark = (f'<div class="trend"><svg class="spark" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">'
-                 f'<polyline class="f" points="{line("five_hour")}"/><polyline class="w" points="{line("seven_day")}"/></svg>'
-                 f'<div class="axis"><span>{tr("lim.trend", at=when(t0, "daytime"))}</span>'
-                 f'<span><span class="dot c0"></span>{tr("lim.trend.week")}<span class="dot f"></span>{tr("lim.trend.five")}</span></div></div>')
+    if week and week[1]:
+        start, reset, length, u, fc = week
+        pts = [(h["t"], h["seven_day"]) for h in hist if h["t"] >= start and h.get("seven_day") is not None] + [(now, u)]
+        if len(pts) >= 3:
+            top = max(100, u, fc or 0) * 1.05   # headroom: the 100 % line and an overshoot stay inside
+            xy = lambda t, v: f"{(t - start) / length * 100:.2f},{100 - v / top * 100:.1f}"
+            cap = 100 - 100 / top * 100
+            fcl = f'<polyline class="fcl" points="{xy(now, u)} {xy(reset, fc)}"/>' if fc else ""
+            lg = f'<span><span class="dot c0"></span>{tr("lim.trend.week")}</span>' + (
+                f'<span><span class="dash"></span>{tr("lim.trend.fc")}</span>' if fc else "") + f'<span><span class="dash cap"></span>{tr("lim.trend.cap")}</span>'
+            spark = (f'<div class="trend"><svg class="spark" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">'
+                     f'<line class="cap" x1="0" x2="100" y1="{cap:.1f}" y2="{cap:.1f}"/><polyline class="w" points="{" ".join(xy(t, v) for t, v in pts)}"/>{fcl}</svg>'
+                     f'<div class="axis"><span>{tr("lim.trend", at=when(start, "daytime"))}</span><span>{tr("lim.trend.reset", at=when(reset, "daytime"))}</span></div>'
+                     f'<div class="lg">{lg}</div></div>')
     left = left or f'<div class="lbl">{tr("lim.week")}</div><p class="hint">{tr("nodata")}</p>'
     stale = now - STATE["ok"] > 1800
     stamp = tr("lim.stale", at=when(STATE["ok"], "daytime")) if stale else tr("lim.stamp", at=hm(STATE["ok"]))
@@ -1636,6 +1647,8 @@ def layout(title, active, p, h1, sub, body, tabs=True, keep=None):
     on = active == "/settings"
     nav += (f'<a class="end{" on" if on else ""}" href="/settings"{" aria-current=page" if on else ""}>'
             f'<svg viewBox="0 0 24 24" aria-hidden="true">{ICONS["/settings"]}</svg>{tr("nav.settings")}</a>')
+    gear = (f'<a class="gear{" on" if on else ""}" href="/settings" aria-label="{tr("nav.settings")}"{" aria-current=page" if on else ""}>'
+            f'<svg viewBox="0 0 24 24" aria-hidden="true">{ICONS["/settings"]}</svg></a>')   # phones only, see style.css
     seg = "".join(chip(tr("period." + k), k == p, link(active, p=k, **(keep or {}))) for k in PERIODS)
     a, b = custom(p) or (time.time() - 6 * 86400, time.time() + 1)
     iso = lambda t: datetime.fromtimestamp(t).date().isoformat()
@@ -1673,7 +1686,7 @@ def layout(title, active, p, h1, sub, body, tabs=True, keep=None):
 {metas}</head>
 <body><div class="app"><aside><a class="brand" href="{link("/", p=p)}"><span class="logo">{LOGO}</span><span>Usagecast</span></a>
 <nav aria-label="{tr("aria.pages")}">{nav}</nav><div class="foot">{foot}</div></aside>
-<main><header class="top"><div><h1>{h1}</h1><p class="sub">{sub}</p></div>{seg}</header>
+<main><header class="top"><div><h1>{h1}</h1><p class="sub">{sub}</p></div>{seg}{gear}</header>
 {body}
 <footer class="pf"><nav aria-label="{tr("aria.lang")}">{" · ".join(langs)}</nav><a href="{REPO_URL}">Usagecast {VERSION}</a></footer></main></div></body></html>"""
 
@@ -1834,7 +1847,7 @@ def page_overview(p):
     d, d30, snap = data_for(p), data_for("30"), load_snap()
     w = d if p == "w" else data_for("w")
     tot, ttl, now = d["total"] or 1, d["ttl"], time.time()
-    active = {floor(h, False) for h, v in d30["hours"].items() if sum(v.values()) > 0}
+    active = {min(int((now - h) // 86400), 29) for h, v in d30["hours"].items() if sum(v.values()) > 0}   # 24-h slices: 30, not 31 dates
     sums = {"1": window_sum(d30, now - 86400), "7": window_sum(d30, now - 7 * 86400), "30": d30["total"]}
     dl = lambda v, since: f'<small class="d">{x}</small>' if (x := week_delta(d30, v, since, now)) else ""
     kpis = [("main", pname(p), money(d["total"]), tr("kpi.main.sub", tokens=num(d["tokens"]), steps=cnt(d["calls"]))
@@ -1844,13 +1857,16 @@ def page_overview(p):
     kpis += [("", tr("kpi.avg"), money(d30["total"] / max(len(active), 1)), tr("kpi.avg.sub", n=len(active))),
              ("", tr("kpi.sessions"), cnt(len(d["sess"])), tr("kpi.sessions.sub"))]
     kpi_html = "".join(f'<div class="kpi {c}"><span>{l}</span><b>{v}</b><small>{s}</small></div>' for c, l, v, s in kpis)
-    tip_html = "".join(f'<div class="tip"><b>{e(t)}</b><p>{txt}</p></div>' for _, t, txt in tips(d, snap)) \
+    tip_html = "".join(f'<div class="tip"><b>{e(t)}</b><p>{txt}</p><span class="gain">{tr("tip.saves", p=pct(sv, tot))}</span></div>'
+                       for sv, t, txt in tips(d, snap)) \
         or f'<p class="hint">{tr("ov.nothing")}</p>'
     where = sorted(d["where"].items(), key=lambda x: -x[1])
     models = sorted(d["models"].items(), key=lambda x: -x[1][2])
-    models_html = '<ol class="rank">' + "".join(
+    models_html = f'<section class="card"><h2>{tr("ov.models")}</h2><ol class="rank">' + "".join(
         f'<li><span class="n">{i}</span><span class="m">{brk(m)}{"" if known_model(m) else " <small>" + tr("ov.estimated") + "</small>"}</span><span class="v">{money(x[2])}</span><b>{pct(x[2], tot)}</b></li>'
-        for i, (m, x) in enumerate(models, 1)) + "</ol>"
+        for i, (m, x) in enumerate(models, 1)) + "</ol></section>"
+    if len(models) < 2 and all(known_model(m) for m, _ in models):
+        models_html = ""   # one model at 100 % says nothing
     logged = tr("ov.logged", p=pc(d["logged"] / (d["n_steps"] or 1) * 100))
     push = "" if ntfy_target() else f'<p class="hint pushoff">{tr("ov.push", url="/settings#push")}</p>'
     split = limit_split(limit_history(), d30["hours"], cc_calls(w["since"]), w["since"]) if w["week"] else None
@@ -1858,11 +1874,10 @@ def page_overview(p):
 <div class="kpis">{kpi_html}</div>
 <div class="grid g2">
 <section class="card"><h2>{tr("ov.eats")}</h2>
-<p class="hint">{tr("ov.eats.hint")}</p>
 {bars(ranked(d["comp"]), tot, ttl, n=10, p=p)}
-<p class="hint">{logged}</p></section>
+<details class="more"><summary>{tr("det.how")}</summary><p class="why">{tr("ov.eats.hint")}</p><p class="why">{logged}</p></details></section>
 <div class="col"><section class="card"><h2>{tr("ov.where")}</h2>{bars(where, tot, ttl, explain=False, n=8, soft=True, name_of=lambda k: (origin_label(k), ""))}</section>
-<section class="card"><h2>{tr("ov.models")}</h2>{models_html}</section></div></div>
+{models_html}</div></div>
 <section class="sec"><h2>{tr("ov.save")}</h2>
 <p class="hint">{tr("ov.save.hint")}</p>
 <div class="tips">{tip_html}</div></section>"""
@@ -2035,21 +2050,25 @@ def day_costs():
 def calendar(days, today=None):
     """GitHub-style year: one column per week, Monday at the top, a month name over its first Monday."""
     today = today or datetime.now().date()
-    d = today - timedelta(days=today.weekday() + 52 * 7)
+    first = datetime.fromisoformat(min((k for k, v in days.items() if v > 0), default=today.isoformat())).date()
+    d = max(today - timedelta(days=today.weekday() + 52 * 7), first - timedelta(days=first.weekday()))
+    old = today - timedelta(days=today.weekday() + 25 * 7)   # phones show the last 26 weeks
+    weeks = (today - d).days // 7 + 1
     shown, out, mx = {}, "", max(days.values(), default=0) or 1
     while d <= today:
+        x = " x" if d < old else ""
         if d.weekday() == 0:
-            out += f'<span>{LOC[lang()]["months"][d.month - 1] if d.day <= 7 or not out else ""}</span>'
+            out += f'<span{x and " class=x"}>{LOC[lang()]["months"][d.month - 1] if d.day <= 7 or not out else ""}</span>'
         v = shown[d] = days.get(d.isoformat(), 0.0)
         lvl = 1 + min(int(math.sqrt(v / mx) * 4), 3) if v > 0 else 0   # square root, so small days stay visible
-        out += f'<i class="h{lvl}" title="{tr("cal.cell", day=when(datetime(d.year, d.month, d.day).timestamp(), "day"), v=money(v))}"></i>'
+        out += f'<i class="h{lvl}{x}" title="{tr("cal.cell", day=when(datetime(d.year, d.month, d.day).timestamp(), "day"), v=money(v))}"></i>'
         d += timedelta(days=1)
     active = [x for x in shown.items() if x[1] > 0]
     if not active:
         return f'<p class="hint">{tr("nodata")}</p>'
     bd, bv = max(active, key=lambda x: x[1])
     scale = "".join(f'<i class="h{i}"></i>' for i in range(5))
-    return (f'<div class="cal" role="img" aria-label="{tr("cal.title")}">{out}</div>'
+    return (f'<div class="cal" role="img" aria-label="{tr("cal.title")}" style="max-width:{weeks * 22}px">{out}</div>'
             f'<div class="scale">{tr("heat.less")}{scale}{tr("heat.more")}</div>'
             f'<p class="hint">{tr("cal.sum", n=len(active), total=len(shown), day=when(datetime(bd.year, bd.month, bd.day).timestamp(), "day"), v=money(bv))}</p>')
 
@@ -2127,17 +2146,17 @@ def page_details(p):
               + table(["th.cause", "th.breaks", "th.cost", "th.share"],
                       [(f'{tr("brk." + k)}<span class="why">{tr("brk." + k + ".why")}</span>', cnt(n), money(v), pct(v, tot)) for k, (n, v) in brs],
                       ("l", "", "", "o")) + "</section>") if brs else ""
+    skills_html = (f'<section class="sec"><h2>{tr("det.skills")}</h2>' + table(["th.skill", "th.loaded", "th.avg_size", "th.cost", "th.share"],
+                   [(brk(k[6:]), cnt(uses.get(k, 0)), avg(k), money(v), pct(v, tot)) for k, v in skills], ("", "", "", "", "o")) + "</section>\n") if skills else ""
+    plugins_html = (f'<section class="sec"><h2>{tr("det.plugins")}</h2>' + table(["th.plugin", "th.messages", "th.avg_tokens", "th.cost", "th.share"],
+                    [(brk(seg_label(k[4:])), cnt(sizes.get(k, [0])[0]), avg(k), money(v), pct(v, tot)) for k, v in inj], ("", "", "", "", "o")) + "</section>\n") if inj else ""
     body = f"""<section><h2>{tr("det.tools")}</h2>
 <p class="hint">{tr("det.tools.hint")}</p>
 {table(["th.tool", "th.calls", "th.avg_return", "th.cost", "th.share"], [trow(k, v) for k, v in tools], ("", "", "", "", "o"))}</section>
 <section class="sec"><h2>{tr("det.heavy")}</h2>
 <p class="hint">{tr("det.heavy.hint")}</p>
 {table(["th.result", "th.session", "th.size", "th.carried", "th.cost"], hv, ("", "l o", "", "o", ""))}</section>
-<section class="sec"><h2>{tr("det.skills")}</h2>
-{table(["th.skill", "th.loaded", "th.avg_size", "th.cost", "th.share"], [(brk(k[6:]), cnt(uses.get(k, 0)), avg(k), money(v), pct(v, tot)) for k, v in skills], ("", "", "", "", "o"))}</section>
-<section class="sec"><h2>{tr("det.plugins")}</h2>
-{table(["th.plugin", "th.messages", "th.avg_tokens", "th.cost", "th.share"], [(brk(seg_label(k[4:])), cnt(sizes.get(k, [0])[0]), avg(k), money(v), pct(v, tot)) for k, v in inj], ("", "", "", "", "o"))}</section>
-<section class="sec"><h2>{tr("det.sys")}</h2>
+{skills_html}{plugins_html}<section class="sec"><h2>{tr("det.sys")}</h2>
 <p class="hint">{tr("det.sys.hint", at=when(snap.get("at", 0), "short"))}</p>
 {table(["th.part", "th.tokens_step", "th.cost", "th.share"], [(e(seg_label(k[4:])), num(snap.get("prompt", {}).get(k[4:], 0)), money(v), pct(v, tot)) for k, v in sysp]
        + [(tr("det.schemas_all"), num(st), money(comp.get("schema", 0)), pct(comp.get("schema", 0), tot))], ("", "", "", "o"))}</section>
@@ -2255,32 +2274,32 @@ def page_sessions(p, q):
     tot = d["total"] or 1
     arg = lambda k: (q.get(k) or [""])[0].strip()
     view, src, proj, term = arg("view"), arg("src"), arg("proj"), arg("q")
-    tabs = (f'<nav class="chips tabs" aria-label="{tr("aria.view")}">' + chip(tr("ses.all"), view != "cron", link("/sessions", p=p))
-            + chip(tr("ses.cron"), view == "cron", link("/sessions", p=p, view="cron")) + "</nav>")
-    sub = tr("sub.hermes", src=source_name(), period=period_text(d))
-    if view == "cron":
-        return layout(tr("ses.cron") + " · Usagecast", "/sessions", p, tr("nav.sessions"), sub, tabs + cron_jobs(d, p), keep={"view": "cron"})
+    sub, cron = tr("sub.hermes", src=source_name(), period=period_text(d)), view == "cron"
     sel = [(s, x) for s, x in d["sess"].items() if (not proj or (x["project"] or NO_PROJ) == proj)
            and (not term or term.lower() in (x["title"] or "").lower())]
     counts = Counter(x["src"] for _, x in sel)
     rows = sorted(((s, x) for s, x in sel if not src or x["src"] == src), key=lambda r: -r[1]["cost"])
-    chips = chip(tr("chip.all"), not src, link("/sessions", p=p, proj=proj, q=term)) + "".join(
-        chip(f"{e(origin_label(k))}<span>{n}</span>", k == src, link("/sessions", p=p, src=k, proj=proj, q=term))
-        for k, n in counts.most_common())
+    chips = chip(tr("chip.all"), not src and not cron, link("/sessions", p=p, proj=proj, q=term)) + "".join(
+        chip(f"{e(origin_label(k))}<span>{n}</span>", k == src or k == "cron" and cron,
+             link("/sessions", p=p, view="cron") if k == "cron" else link("/sessions", p=p, src=k, proj=proj, q=term))
+        for k, n in counts.most_common())   # the cron chip opens the per-job table, its rows lead to the runs
     hidden = "".join(f'<input type="hidden" name="{k}" value="{e(v)}">' for k, v in (("p", p), ("src", src), ("proj", proj)) if v)
     search = (f'<form class="search" action="/sessions" role="search">{hidden}<input type="search" name="q" value="{e(term)}" '
               f'placeholder="{tr("ses.search")}" aria-label="{tr("ses.search")}"></form>')
     flt = f'<div class="filters"><nav class="chips" aria-label="{tr("aria.origin")}">{chips}</nav>{search}</div>'
+    if cron:
+        return layout(tr("ses.cron") + " · Usagecast", "/sessions", p, tr("nav.sessions"), sub, flt + cron_jobs(d, p), keep={"view": "cron"})
     if proj:
         clear = f'<a href="{link("/sessions", p=p, src=src, q=term)}">{tr("ses.clear")}</a>'
         flt += f'<p class="hint">{tr("ses.only_project", name=e(proj_label(proj)), clear=clear)}</p>'
     s_cost = sum(x["cost"] for _, x in rows)
-    trs = [(f'<a href="/s/{quote(s)}?p={p}">{e((x["title"] or tr("untitled"))[:80])}</a>', e(origin_label(x["origin"])),
+    trs = [(f'<a href="/s/{quote(s)}?p={p}">{e((x["title"] or tr("untitled"))[:80])}</a>'
+             f'<span class="why">{e(origin_label(x["origin"]))} · {when(x["last"], "daytime")}</span>',
             e(proj_label(x["project"] or NO_PROJ)) if x["project"] else "–", cnt(x["calls"]), money(x["cost"]), pct(x["cost"], tot),
             f'<span class="why">{e(label(x["top"], d["ttl"])[0])}</span>') for s, x in rows[:200]]
-    body = f"""{tabs}{flt}
+    body = f"""{flt}
 <p class="hint">{tr("ses.count", n=cnt(len(rows)), cost=money(s_cost), p=pct(s_cost, tot))}</p>
-{table(["th.session", "th.origin", "th.project", "th.steps", "th.cost", "th.share", "th.top"], trs, ("", "l o", "l o", "", "", "o", "l o"), "titles")}"""
+{table(["th.session", "th.project", "th.steps", "th.cost", "th.share", "th.top"], trs, ("", "l o", "", "", "o", "l o"), "titles")}"""
     return layout(tr("nav.sessions") + " · Usagecast", "/sessions", p, tr("nav.sessions"), sub, body, keep={"src": src, "proj": proj, "q": term})
 
 
@@ -2299,8 +2318,8 @@ def page_projects(p):
             f'<i style="width:{c / (top or 1) * 100:.1f}%"></i></div>', cnt(s), cnt(st), money(c), pct(c, tot),
             f'<span class="why">{e(label(max(comp.items(), key=lambda x: x[1])[0], d["ttl"])[0]) if comp else ""}</span>')
            for n, (s, st, c, comp) in rows]
-    body = f"""<p class="hint">{tr("proj.hint", hermes=tr("proj.hermes"))}</p>
-{table(["th.project", "th.sessions", "th.steps", "th.cost", "th.share", "th.top"], trs, ("", "", "o", "", "", "l o"), "titles")}"""
+    body = f"""{table(["th.project", "th.sessions", "th.steps", "th.cost", "th.share", "th.top"], trs, ("", "", "o", "", "", "l o"), "titles")}
+<details class="more"><summary>{tr("det.how")}</summary><p class="why">{tr("proj.hint", hermes=tr("proj.hermes"))}</p></details>"""
     return layout(tr("nav.projects") + " · Usagecast", "/projects", p, tr("nav.projects"), tr("sub.projects", src=source_name(), period=period_text(d)), body)
 
 
@@ -2436,16 +2455,17 @@ def page_settings(q):
     source = (field("source", T("src.label"), select("source", [("", main), *((x, e(x)) for x in ps)],
                                                      s["source"] if s["source"] in ps else ""), T("src.why")) if ps
               else field("source", T("src.label"), f'<span class="why">{main}</span>', T("src.none")))
-    alerts_ = (field("alert_five", T("a.five"), five, T("a.five.why")) + field("alert_week", T("a.week"), check("alert_week"), T("a.week.why"))
-               + field("alert_extra", T("a.extra"), check("alert_extra"), T("a.extra.why"))
+    alerts_ = (f'<h3>{T("ag.limits")}</h3>' + field("alert_five", T("a.five"), five, T("a.five.why"))
+               + field("alert_week", T("a.week"), check("alert_week"), T("a.week.why"))
+               + field("alert_free", T("a.free"), check("alert_free"), T("a.free.why"))
+               + field("alert_steps", T("a.steps"), check("alert_steps"), T("a.steps.why"))
+               + f'<h3>{T("ag.costs")}</h3>' + field("alert_extra", T("a.extra"), check("alert_extra"), T("a.extra.why"))
                + field("extra_steps", T("a.extra.steps"), f'<input id="extra_steps" name="extra_steps" value="{e(s["extra_steps"])}"'
                        f' inputmode="decimal" placeholder="10, 20" spellcheck="false" autocomplete="off"><span class="why">{e(acur)}</span>',
                        T("a.extra.steps.why"))
-               + field("alert_free", T("a.free"), check("alert_free"), T("a.free.why"))
-               + field("alert_steps", T("a.steps"), check("alert_steps"), T("a.steps.why"))
                + field("alert_chat", T("a.chat"), check("alert_chat") + share("chat_pct"), T("a.chat.why") + nok)
                + field("alert_spike", T("a.spike"), check("alert_spike") + share("spike_pct"), T("a.spike.why") + nok)
-               + field("alert_digest", T("a.digest"), check("alert_digest"), T("a.digest.why")) + field("quiet", T("quiet"), quiet, T("quiet.why")))
+               + f'<h3>{T("ag.digest")}</h3>' + field("alert_digest", T("a.digest"), check("alert_digest"), T("a.digest.why")) + field("quiet", T("quiet"), quiet, T("quiet.why")))
     host, own = urlparse(s["ntfy_server"]).netloc, s["ntfy_server"] != "https://ntfy.sh"
     target = ntfy_target()
     state = (T("push.state.off") if not target else T("push.state.hermes") if s["push"] == "hermes"
@@ -2896,12 +2916,18 @@ def selftest():
                            "five_hour": {"utilization": 30, "resets_at": iso(nw + 3600)}}
         STATE["limits"]["extra_usage"] = {"is_enabled": True, "used_credits": 501, "monthly_limit": 2500, "decimal_places": 2, "currency": "EUR"}
         RATE.update(k=0.5, hours=10)
+        DATA.mkdir(parents=True, exist_ok=True)
+        (DATA / "limits.jsonl").write_text("".join(json.dumps({"t": nw - 3 * 86400 + i * 3600, "seven_day": 50 + i}) + "\n" for i in range(3)))
         c = limits_card(None)
+        (DATA / "limits.jsonl").unlink()
+        assert c.count('class="fcl"') == 1 and c.count('class="cap"') == 1 and "Reset " in c, c   # trend: this week, 100 % line, forecast
         assert "runs ~20% over, about $" in c and "Extra credits this month" in c, c
         RATE.clear()
         assert "Too fast:" in c and tr("lim.budget", pct=pc(40 / 3.5)) in c, c
         STATE["limits"]["seven_day"]["utilization"] = 40
         assert "On track:</strong> about 80%" in limits_card(None)
+        STATE["limits"]["seven_day"]["utilization"] = 45
+        assert "Tight:</strong> about 90%" in limits_card(None)   # 85-100 % is no longer "On track"
         STATE["limits"] = old
         cl = Path(tmp) / "claude" / "projects" / "-x"
         cl.mkdir(parents=True)
@@ -2962,7 +2988,8 @@ def selftest():
         LAST_PUSH.update(at=time.time(), ok=False, reply="<x>")
         assert abs(sum(day_costs().values()) - real) < 1e-9, (day_costs(), real)   # the calendar loses nothing
         cal = calendar({(datetime.now().date() - timedelta(days=1)).isoformat(): 2.0})
-        assert cal.count('class="h4" title') == 1 and cal.count("<i ") >= 365 + 5, cal[:200]
+        assert cal.count('class="h4" title') == 1 and 2 <= cal.count("<i ") <= 14, cal[:200]   # a young install starts at its first week
+        assert calendar({"2000-01-03": 1.0, datetime.now().date().isoformat(): 1.0}).count("<i ") >= 365 + 5   # at most a year
         (HERMES / "cron").mkdir()
         (HERMES / "cron" / "jobs.json").write_text(json.dumps({"jobs": [
             {"id": "j1", "name": "Daily report", "state": "paused", "repeat": {"times": None}},

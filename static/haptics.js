@@ -4,7 +4,7 @@
 // transparent label on top, tied to a hidden switch: the tap hits the label, Safari vibrates, and because the label
 // swallows the tap's normal action, the script clicks the control itself. Same trick as github.com/tijnjh/ios-haptics.
 // Other phones use navigator.vibrate where it exists (Android). The system setting for haptics still applies.
-const SEL = "nav a, a.btn, button:not(.sr), summary, .set input[type=checkbox], .set input[type=radio]"
+const SEL = "nav a, a.gear, a.btn, button:not(.sr), summary, .set input[type=checkbox], .set input[type=radio]"
 const ios = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
 
 if (!ios) {
