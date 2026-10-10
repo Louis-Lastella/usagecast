@@ -28,7 +28,7 @@ Ohne Hermes ausprobieren: `python3 app.py --demo` startet es mit einem Monat erf
 | `/` | Limits mit Tempo, Tagesbudget und Prognose, Kennzahlen mit Vergleich zur Vorwoche, Rangliste was am meisten frisst, Herkunft, Modelle, Spartipps |
 | `/history` | Kosten pro Tag nach den größten Posten mit Markern für Hermes-Updates und Config-Änderungen, diese Woche über den drei davor, Heatmap nach Wochentag und Uhrzeit, Aktivitätskalender, Tagestabelle |
 | `/details` | Alle Tools, Skills, Plugins, Systemprompt-Teile und Tool-Beschreibungen einzeln, Cache-Brüche mit wahrscheinlicher Ursache, die zehn teuersten einzelnen Tool-Ergebnisse |
-| `/sessions` | Teuerste Sessions mit Filter nach Herkunft und Suche, Reiter Cron-Jobs mit Kosten pro Lauf und Woche. Eine Session-Seite zeigt jeden Schritt und den Befehl `hermes --resume <id>` |
+| `/sessions` | Teuerste Sessions mit Herkunft und letzter Aktivität unter jedem Titel, einer Filterreihe und Suche; der Chip Cron-Jobs zeigt Kosten pro Lauf und Woche. Eine Session-Seite zeigt jeden Schritt und den Befehl `hermes --resume <id>` |
 | `/projects` | Kosten pro Projekt, antippen zeigt die Sessions dazu |
 | `/settings` | Darstellung, Limit-Anzeige, Warnungen und Push-Einrichtung |
 | `/api/summary` | Limits, Prognose und Kosten der Limit-Woche als JSON, für Widgets |
@@ -82,9 +82,10 @@ Wochenrhythmus (welcher Anteil der Kosten einer üblichen Woche bis zu dieser St
 mindestens 10 % genauer ist; der Ausklapptext unter dem Wochenlimit nennt Verfahren und beide Abweichungen (Ergebnis in
 `data/forecast.json`).
 
-**Tempo und Budget:** Ein Strich auf jedem Limit-Balken zeigt, wie viel vom Fenster schon vorbei ist. Liegt der
-Verbrauch davor, heißt es „Zu schnell“ mit der Uhrzeit, zu der das Limit voll ist, liegt er dahinter, „Im Plan“ mit dem
-erwarteten Stand zum Reset. Das Tagesbudget ist der Rest der Woche geteilt durch die Tage bis zum Reset. Meldet die
+**Tempo und Budget:** Ein Strich auf jedem Limit-Balken zeigt, wie viel vom Fenster schon vorbei ist. Liegt die
+Prognose über 100 %, heißt es „Zu schnell“ mit der Uhrzeit, zu der das Limit voll ist, bei 85 bis 100 % „Knapp“, darunter
+„Im Plan“ mit dem erwarteten Stand zum Reset. Die Linie unter den Limits zeigt die laufende Limit-Woche mit der
+100-%-Linie und gestrichelt die Prognose bis zum Reset. Das Tagesbudget ist der Rest der Woche geteilt durch die Tage bis zum Reset. Meldet die
 Statusseite von Anthropic eine Störung, steht unter den Limits eine Zeile dazu.
 
 **Aufteilung des Limits:** Aus den Limit-Messungen alle 10 Minuten und den Kosten pro Stunde schätzt Usagecast, wie viel

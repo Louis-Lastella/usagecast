@@ -28,7 +28,7 @@ Try it without Hermes: `python3 app.py --demo` starts it on a month of made-up d
 | `/` | Limits with pace, daily budget and forecast, key figures with the change against last week, what eats the most, origins, models, tips |
 | `/history` | Cost per day by the biggest items with markers for Hermes updates and config changes, this week laid over the three before, heatmap by weekday and hour, activity calendar, day-by-day table |
 | `/details` | Every tool, skill, plugin, system prompt part and tool description on its own, cache breaks with their likely cause, the ten most expensive single tool results |
-| `/sessions` | Most expensive sessions with origin filter and search, cron tab with cost per run and per week. A session page shows every step and the `hermes --resume <id>` command |
+| `/sessions` | Most expensive sessions with origin and last activity under each title, one filter row and search; the cron chip shows cost per run and per week. A session page shows every step and the `hermes --resume <id>` command |
 | `/projects` | Cost per project, tap one to see its sessions |
 | `/settings` | Appearance, limits display, alerts and push setup |
 | `/api/summary` | Limits, forecast and this limit week's cost as JSON, for widgets |
@@ -80,8 +80,9 @@ methods on your last complete limit weeks: a straight line from the pace since t
 share of a usual week's cost has passed by this hour). The rhythm is used when it is at least 10 % more accurate; the
 fold under the weekly limit names the method and both errors (result in `data/forecast.json`).
 
-**Pace and budget:** A mark on each limit bar shows how much of the window has passed. Ahead of it means "Too fast"
-with the time the limit will be full, behind it "On track" with the expected value at the reset. The daily budget is
+**Pace and budget:** A mark on each limit bar shows how much of the window has passed. A forecast above 100 % means "Too fast"
+with the time the limit will be full, 85-100 % "Tight", below that "On track" with the expected value at the reset. The
+trend under the limits shows this limit week against the 100 % line, with the forecast dashed up to the reset. The daily budget is
 what is left of the week divided by the days until the reset. When Anthropic's status page reports an incident, a line
 under the limits says so.
 
