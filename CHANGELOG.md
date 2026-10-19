@@ -2,6 +2,22 @@
 
 Versions follow [Semantic Versioning](https://semver.org).
 
+## 3.2.0 - 2026-10-19
+
+Every agent counted, who is working right now, and Usagecast as a Telegram Mini App.
+
+- All Hermes profiles by default: each home is analysed with its own logs, prompt snapshot and config, then added up
+  (setting "All agents"; one home can still be chosen). A "By agent" card on the overview, the agent under each session
+  title, `hermes -p <profile> --resume` on session pages, tips with the profile's command, cron jobs and the budget
+  guard across profiles.
+- "Right now" card on the overview: the agents at work with their current step, how long the turn has run and what the
+  session cost so far, subagents under their parent, a warning when the gateway or a platform is down, the next cron
+  runs. `/live` serves the card and it refreshes every 5 s while in view; `/api/summary` gains `agents`.
+- Telegram Mini App: Telegram's haptics and back button, header colours that match the page, no swipe-to-close while
+  scrolling, full screen on phones, "Add to home screen" in the settings (`static/app.js`).
+- Telegram through a Hermes bot (settings card "Telegram"): alerts as messages with an "Open" button into the Mini App,
+  the limits on the bot's menu button, and one pinned status message edited in place every 10 minutes.
+
 ## 3.1.0 - 2026-10-11
 
 UX pass from a review of every page on desktop and phone.
