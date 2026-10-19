@@ -145,7 +145,8 @@ dem Handy im Vollbild und bietet in den Einstellungen „Zum Home-Bildschirm“ 
 Auf `/settings` wählt die Karte Telegram, welches Hermes den Bot stellt (Token und Chat aus dessen `.env`:
 `TELEGRAM_BOT_TOKEN`, `TELEGRAM_HOME_CHANNEL`), und auf Wunsch ein Thema. Dann gehen Warnungen an Telegram (Push über
 Telegram) mit einem Knopf „Öffnen“, der Menü-Knopf zeigt die Limits (`W 16% · 5h 68%`), und eine angepinnte Nachricht
-hält Woche, 5-Stunden-Fenster und arbeitende Agenten alle 10 Minuten aktuell.
+hält Woche, 5-Stunden-Fenster und arbeitende Agenten alle 10 Minuten aktuell. In Themen blendet Telegram den Menü-Knopf
+aus, deshalb wird die Nachricht ohne gewähltes Thema zusätzlich in jedem Thema des Chats angepinnt, mit „Öffnen“ oben.
 
 ## Widgets (iPhone, Home- und Sperrbildschirm)
 

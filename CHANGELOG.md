@@ -2,6 +2,12 @@
 
 Versions follow [Semantic Versioning](https://semver.org).
 
+## 3.2.1 - 2026-10-19
+
+- Telegram: the pinned status with its "Open" button now sits in every topic of the chat, not only in the chat itself.
+  Telegram shows the menu button only outside topics. Topics come from the home topic, `dm_topics` in config.yaml and
+  the sessions; a deleted topic is skipped from then on.
+
 ## 3.2.0 - 2026-10-19
 
 Every agent counted, who is working right now, and Usagecast as a Telegram Mini App.
