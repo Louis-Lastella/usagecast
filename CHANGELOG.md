@@ -2,6 +2,11 @@
 
 Versions follow [Semantic Versioning](https://semver.org).
 
+## 3.2.2 - 2026-10-19
+
+- Telegram: back to one pinned status in the chat itself. The per-topic pins of 3.2.1 are gone; they were not wanted
+  and do not bring the menu button into topics.
+
 ## 3.2.1 - 2026-10-19
 
 - Telegram: the pinned status with its "Open" button now sits in every topic of the chat, not only in the chat itself.

@@ -139,8 +139,7 @@ offers "Add to home screen" in the settings.
 Under `/settings`, the Telegram card picks the Hermes home whose bot to use (token and chat come from its `.env`:
 `TELEGRAM_BOT_TOKEN`, `TELEGRAM_HOME_CHANNEL`) and optionally a topic. Then alerts can go to Telegram (Push via
 Telegram) with an "Open" button, the menu button shows the limits (`W 16% · 5h 68%`), and one pinned message keeps the
-week, the 5-hour window and the agents at work up to date every 10 minutes. Telegram hides the menu button inside
-topics, so with no topic chosen that message is pinned in every topic of the chat too, its "Open" button at the top.
+week, the 5-hour window and the agents at work up to date every 10 minutes.
 
 ## Widgets (iPhone home screen and Lock Screen)
 
