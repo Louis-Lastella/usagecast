@@ -1260,32 +1260,9 @@ def tg_target():
     """(bot token, chat, topic) of the Telegram bot chosen in the settings: the bot and home channel of that Hermes home."""
     if SET["tg_bot"] == "off":
         return None
-    env = hermes_env("TELEGRAM_", tg_home())
+    env = hermes_env("TELEGRAM_", HERMES / "profiles" / SET["tg_bot"] if SET["tg_bot"] in profiles() else HERMES)
     chat = (env.get("TELEGRAM_HOME_CHANNEL") or "").split(",")[0].strip()
     return (env["TELEGRAM_BOT_TOKEN"], chat, SET["tg_thread"]) if env.get("TELEGRAM_BOT_TOKEN") and chat else None
-
-
-def tg_home():
-    return HERMES / "profiles" / SET["tg_bot"] if SET["tg_bot"] in profiles() else HERMES
-
-
-def tg_topics(chat):
-    """Topic ids of the bot chat: the home topic, dm_topics in config.yaml and every topic a session ran in. The Bot API
-    cannot list topics of a private chat, and Telegram shows the menu button only outside topics."""
-    h = tg_home()
-    with at_home(h):
-        ids = set(re.findall(r"^\s*thread_id:\s*['\"]?(\d+)", config_text(), re.M))
-        try:
-            c = connect()
-            try:
-                ids |= {str(r[0]) for r in c.execute("select distinct thread_id from sessions where source = 'telegram' and chat_id = ?",
-                                                     (chat,))}
-            finally:
-                c.close()
-        except sqlite3.Error:
-            pass   # no state.db yet, or a Hermes without topic columns
-    ids.add(hermes_env("TELEGRAM_HOME_CHANNEL_THREAD_ID", h).get("TELEGRAM_HOME_CHANNEL_THREAD_ID", ""))
-    return sorted((i for i in ids if i.isdigit()), key=int)
 
 
 def tg_call(method, **body):
@@ -1486,15 +1463,14 @@ def ensure_snap():
 
 
 def tg_status():
-    """10-minute step: the limits as the text of the bot's menu button, and a pinned status message edited in place, in
-    the chat and in each of its topics."""
+    """10-minute step: the limits as the text of the bot's menu button, and one pinned status message edited in place."""
     t, L = tg_target(), STATE["limits"]
     if not t or not L or not SET["url"].startswith("https://"):
         return
     now, dest = time.time(), f'{SET["tg_bot"]}:{t[1]}:{t[2]}'
     st = read_json(DATA / "tg.json") or {}
     st = st if st.get("dest") == dest else {"dest": dest}   # another bot, chat or topic: start over there
-    old = copy.deepcopy(st)
+    old = dict(st)
     win = {k: (u, frac, reset) for k, u, frac, reset, _ in windows(L, now)}
     wk, fh = win.get("seven_day"), win.get("five_hour")
     if not wk or not fh:
@@ -1509,26 +1485,17 @@ def tg_status():
         text = "\n".join((tr("tg.pin.week", w=round(wk[0]), fc=round(fc) if fc is not None else "–"),
                           tr("tg.pin.five", f=round(fh[0]), at=hm(fh[2]) if fh[2] else "–"),
                           tr("live.n", n=live()["n"]), tr("tg.pin.at", at=hm(now))))
-        pins = st.setdefault("pins", {})
-        if "pin" in st:   # up to 3.2.0: one pin, in the chosen topic or the chat itself
-            pins[t[2]] = {"id": st.pop("pin"), "text": st.pop("pin_text", "")}
-        # No topic chosen: the chat itself plus every topic, as Telegram hides the menu button inside topics
-        for th in [t[2]] if t[2] else ["", *tg_topics(t[1])]:
-            p = pins.get(th, {})
-            if p is None or p.get("text") == text:   # topic deleted, or nothing new
-                continue
-            ok, r = tg_call("editMessageText", chat_id=t[1], message_id=p["id"], text=text, **tg_open(t)) if p.get("id") else (False, "400 new")
+        if st.get("pin_text") != text:
+            ok, r = tg_call("editMessageText", chat_id=t[1], message_id=st["pin"], text=text, **tg_open(t)) if st.get("pin") else (False, "400 new")
             ok = ok or "not modified" in str(r)
             if not ok and str(r).startswith("400"):   # gone or never sent; a network error just waits for the next round
-                ok, r = tg_call("sendMessage", chat_id=t[1], **({"message_thread_id": int(th)} if th else {}), text=text,
+                ok, r = tg_call("sendMessage", chat_id=t[1], **({"message_thread_id": int(t[2])} if t[2] else {}), text=text,
                                 disable_notification=True, **tg_open(t))
                 if ok:
-                    p = {"id": r["message_id"]}
-                    tg_call("pinChatMessage", chat_id=t[1], message_id=p["id"], disable_notification=True)
-                elif str(r).startswith("400") and "thread" in str(r).lower():
-                    pins[th] = None   # topic deleted: never post there again
+                    st["pin"] = r["message_id"]
+                    tg_call("pinChatMessage", chat_id=t[1], message_id=st["pin"], disable_notification=True)
             if ok:
-                pins[th] = {**p, "text": text}
+                st["pin_text"] = text
     if st != old:
         DATA.mkdir(parents=True, exist_ok=True)
         (DATA / "tg.json").write_text(json.dumps(st))
@@ -3269,39 +3236,6 @@ def selftest():
         assert "On track:</strong> about 80%" in limits_card(None)
         STATE["limits"]["seven_day"]["utilization"] = 45
         assert "Tight:</strong> about 90%" in limits_card(None)   # 85-100 % is no longer "On track"
-        # Telegram status: the old single pin is kept, every topic gets its own, a deleted topic is skipped from then on
-        bot = HERMES / "profiles" / "bot"
-        bot.mkdir()
-        (bot / ".env").write_text("TELEGRAM_BOT_TOKEN=x\nTELEGRAM_HOME_CHANNEL=5\nTELEGRAM_HOME_CHANNEL_THREAD_ID=7\n")
-        (bot / "config.yaml").write_text("platforms:\n  telegram:\n    extra:\n      dm_topics:\n        - chat_id: 5\n          topics:\n"
-                                         "            - name: A\n              thread_id: 8\n")
-        b = sqlite3.connect(bot / "state.db")
-        b.executescript("create table sessions(source, chat_id, thread_id);"
-                        "insert into sessions values ('telegram', '5', '9'), ('telegram', '6', '10'), ('telegram', '5', null);")
-        b.commit()
-        b.close()
-        calls, real_call, tg_old = [], tg_call, {k: SET[k] for k in ("tg_bot", "tg_thread", "url")}
-
-        def fake_call(m, **body):
-            calls.append((m, body.get("message_thread_id")))
-            if m == "sendMessage" and body.get("message_thread_id") == 9:
-                return False, "400 Bad Request: message thread not found"
-            return True, {"message_id": 100 + len(calls)} if m == "sendMessage" else True
-        globals()["tg_call"] = fake_call
-        SET.update(tg_bot="bot", tg_thread="", url="https://u")
-        (DATA / "tg.json").write_text(json.dumps({"dest": "bot:5:", "pin": 42, "pin_text": "old"}))
-        assert tg_topics("5") == ["7", "8", "9"], tg_topics("5")
-        tg_status()
-        st = read_json(DATA / "tg.json")
-        assert st["pins"][""]["id"] == 42 and st["pins"]["9"] is None and st["pins"]["7"]["id"] > 100 and "pin" not in st, st
-        assert ("sendMessage", 7) in calls and ("sendMessage", 8) in calls and calls.count(("pinChatMessage", None)) == 2, calls
-        calls.clear()
-        tg_status()
-        assert calls == [], calls   # same text: no edit, and nothing goes to the deleted topic
-        globals()["tg_call"] = real_call
-        SET.update(tg_old)
-        shutil.rmtree(bot)
-        (DATA / "tg.json").unlink()
         STATE["limits"] = old
         cl = Path(tmp) / "claude" / "projects" / "-x"
         cl.mkdir(parents=True)
