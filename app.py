@@ -10,8 +10,9 @@ moment: tools, skills, plugins, system prompt parts, thinking, cache rebuilds af
   python3 app.py --ntfy-test              send a test alert
   <hermes-venv>/python app.py --snapshot  measure system prompt parts and tool schemas (the server does this daily)
 """
-import bisect, glob, gzip, hmac, html, json, math, os, random, re, secrets, shutil, sqlite3, statistics, subprocess, sys, tempfile, threading, time, traceback, urllib.error, urllib.request
+import bisect, copy, glob, gzip, hmac, html, json, math, os, random, re, secrets, shutil, sqlite3, statistics, subprocess, sys, tempfile, threading, time, traceback, urllib.error, urllib.request
 from collections import Counter, defaultdict
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -98,21 +99,23 @@ def _env_ntfy():
 
 
 _SRV, _TOPIC = _env_ntfy()
+ALL = "*"   # "source" setting: every Hermes home, the main one and each profile
 DEFAULTS = {
     "theme": "system", "lang": DEFAULT_LANG, "currency": "USD", "numbers": "compact", "period": DEFAULT_P, "limit_view": "used",
-    "cost_unit": "money", "source": "",
+    "cost_unit": "money", "source": ALL,
     "alert_five": True, "five_min": 30, "alert_week": True, "alert_extra": True, "alert_free": True, "alert_steps": True,
     "alert_digest": True, "alert_chat": True, "chat_pct": 0.5, "alert_spike": True, "spike_pct": 3.0, "extra_steps": "",
     "guard": False, "guard_jobs": [], "ingest_token": "",
     "quiet": False, "quiet_from": "22:00", "quiet_to": "07:00",
     "push": "own" if _TOPIC else "off", "ntfy_server": _SRV, "ntfy_topic": _TOPIC, "ntfy_token": "", "url": PUBLIC_URL,
+    "tg_bot": "off", "tg_thread": "", "tg_menu": True, "tg_pin": True,
 }
 CHOICES = {"theme": ("system", "light", "dark"), "lang": tuple(LOC), "currency": ("USD", "EUR"), "numbers": ("compact", "full"),
-           "period": tuple(PERIODS), "limit_view": ("used", "left"), "cost_unit": ("money", "week"), "push": ("off", "own", "hermes")}
+           "period": tuple(PERIODS), "limit_view": ("used", "left"), "cost_unit": ("money", "week"), "push": ("off", "own", "hermes", "telegram")}
 RANGES = {"five_min": (5, 240), "chat_pct": (0.1, 50.0), "spike_pct": (0.5, 50.0)}
 URL_RX = r"https?://[^\s\"'<>]+"
 HHMM = r"([01]\d|2[0-3]):[0-5]\d"
-FORMATS = {"quiet_from": HHMM, "quiet_to": HHMM, "ntfy_topic": r"[A-Za-z0-9_-]{1,64}", "ntfy_server": URL_RX, "url": f"({URL_RX})?",
+FORMATS = {"tg_thread": r"\d{0,12}", "quiet_from": HHMM, "quiet_to": HHMM, "ntfy_topic": r"[A-Za-z0-9_-]{1,64}", "ntfy_server": URL_RX, "url": f"({URL_RX})?",
            "extra_steps": r"(\d+(\.\d+)?(\s*[,; ]\s*\d+(\.\d+)?)*)?"}
 
 
@@ -135,13 +138,41 @@ def profiles():
 
 
 def source_home():
-    """Hermes home the analysis reads (state.db, logs, config.yaml, cron, SOUL.md): the main one or the chosen
-    profile. Code and limits always come from the main home, profiles share the install and the account."""
+    """Hermes home the analysis reads (state.db, logs, config.yaml, cron, SOUL.md): the one at_home() set for this
+    thread, else the main one or the chosen profile. Code and limits always come from the main home, profiles share the
+    install and the account."""
+    h = getattr(_req, "home", None)
+    if h:
+        return h
     return HERMES / "profiles" / SET["source"] if SET["source"] in profiles() else HERMES
 
 
+def homes():
+    """(agent, home) of every Hermes home the dashboard covers: the main one ("") and each profile, or the chosen one."""
+    if SET["source"] == ALL:
+        return [("", HERMES), *((n, HERMES / "profiles" / n) for n in profiles())]
+    return [(SET["source"], HERMES / "profiles" / SET["source"])] if SET["source"] in profiles() else [("", HERMES)]
+
+
+@contextmanager
+def at_home(h):
+    """Points source_home() of this thread at h while the block runs."""
+    old, _req.home = getattr(_req, "home", None), h
+    try:
+        yield
+    finally:
+        _req.home = old
+
+
+def agent_label(a):
+    return a or "Hermes"
+
+
 def source_name():
-    return "Hermes" if source_home() == HERMES else tr("src.profile", name=html.escape(SET["source"]))
+    hs = homes()
+    if len(hs) > 1:
+        return tr("src.all", n=len(hs))
+    return "Hermes" if hs[0][1] == HERMES else tr("src.profile", name=html.escape(hs[0][0]))
 
 
 def clean(form, cur):
@@ -160,7 +191,9 @@ def clean(form, cur):
                 x = None
             s[k] = min(max(x, RANGES[k][0]), RANGES[k][1]) if x is not None and math.isfinite(x) else s[k]
         elif k == "source":
-            s[k] = v if v in ("", *profiles()) else s[k]
+            s[k] = v if v in ("", ALL, *profiles()) else s[k]
+        elif k == "tg_bot":
+            s[k] = v if v in ("off", "hermes", *profiles()) else s[k]
         elif k == "ingest_token":
             pass   # only the "new token" button sets it
         elif k == "guard_jobs":
@@ -881,6 +914,16 @@ def tips(d, snap):
     return sorted(out, key=lambda x: -x[0])
 
 
+def all_tips(d):
+    """Tips of every agent in an analysis, each from its own prompt snapshot and with its own hermes -p command.
+    ponytail: a tip's share text is of its own agent's cost, the "saves" figure is of the whole."""
+    out = []
+    for _, h, x in d["parts"]:
+        with at_home(h):
+            out += tips(x, load_snap())
+    return sorted(out, key=lambda x: -x[0])
+
+
 def limit_history(days=7):
     cut = time.time() - days * 86400
     try:
@@ -1200,16 +1243,63 @@ def alerts(L, hist, sent, now, s=None):
     return out, sent
 
 
-def hermes_ntfy():
-    """(server, topic, token) of the channel Hermes itself sends to (NTFY_* in ~/.hermes/.env), otherwise None."""
+def hermes_env(prefix, home=HERMES):
+    """Variables starting with prefix from a Hermes home's .env."""
     env = {}
     try:
-        for line in (HERMES / ".env").read_text().splitlines():
+        for line in (home / ".env").read_text().splitlines():
             k, _, v = line.partition("=")
-            if k.strip().startswith("NTFY_"):
+            if k.strip().startswith(prefix):
                 env[k.strip()] = v.strip().strip("'\"")
     except OSError:
         pass
+    return env
+
+
+def tg_target():
+    """(bot token, chat, topic) of the Telegram bot chosen in the settings: the bot and home channel of that Hermes home."""
+    if SET["tg_bot"] == "off":
+        return None
+    env = hermes_env("TELEGRAM_", HERMES / "profiles" / SET["tg_bot"] if SET["tg_bot"] in profiles() else HERMES)
+    chat = (env.get("TELEGRAM_HOME_CHANNEL") or "").split(",")[0].strip()
+    return (env["TELEGRAM_BOT_TOKEN"], chat, SET["tg_thread"]) if env.get("TELEGRAM_BOT_TOKEN") and chat else None
+
+
+def tg_call(method, **body):
+    """(ok, result or error text) of one Bot API call through the chosen bot. Errors never echo the URL (it holds the token)."""
+    t = tg_target()
+    if not t:
+        return False, tr("set.tg.off")
+    req = urllib.request.Request(f"https://api.telegram.org/bot{t[0]}/{method}", json.dumps(body).encode(),
+                                 {"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=15) as r:
+            return True, json.loads(r.read()).get("result")
+    except urllib.error.HTTPError as err:
+        try:
+            return False, f'{err.code} {json.loads(err.read()).get("description", "")}'
+        except ValueError:
+            return False, str(err.code)
+    except (OSError, ValueError) as err:
+        return False, str(getattr(err, "reason", "")) or type(err).__name__
+
+
+def tg_open(t, path="/"):
+    """Inline button that opens the dashboard: as the Mini App in a private chat, as a link in groups."""
+    url = SET["url"] + path
+    if not url.startswith("https://"):
+        return {}
+    btn = {"web_app": {"url": url}} if not t[1].startswith("-") else {"url": url}
+    return {"reply_markup": {"inline_keyboard": [[{"text": tr("tg.open"), **btn}]]}}
+
+
+def push_on():
+    return bool(tg_target()) if SET["push"] == "telegram" else bool(ntfy_target())
+
+
+def hermes_ntfy():
+    """(server, topic, token) of the channel Hermes itself sends to (NTFY_* in ~/.hermes/.env), otherwise None."""
+    env = hermes_env("NTFY_")
     if not env.get("NTFY_HOME_CHANNEL"):
         return None
     return (env.get("NTFY_SERVER_URL") or "https://ntfy.sh").rstrip("/"), env["NTFY_HOME_CHANNEL"], env.get("NTFY_TOKEN")
@@ -1226,6 +1316,13 @@ def ntfy_target():
 
 def send_push(title, text, prio=4, path=""):
     """(sent, the server's reply). Priority 4 = high (limit almost full, week won't last), 3 = normal, 2 = low."""
+    if SET["push"] == "telegram":
+        t = tg_target()
+        if not t:
+            return False, tr("set.tg.off")
+        ok, r = tg_call("sendMessage", chat_id=t[1], **({"message_thread_id": int(t[2])} if t[2] else {}), parse_mode="HTML",
+                        text=f"<b>{html.escape(title)}</b>\n{html.escape(text)}", disable_notification=prio <= 2, **tg_open(t, path))
+        return ok, "200 OK" if ok else r
     t = ntfy_target()
     if not t:
         return False, tr("set.push.state.off")
@@ -1353,14 +1450,55 @@ def refresh_status():
 
 
 def ensure_snap():
-    """Measures prompt and tools again when the snapshot of the analysed Hermes is missing or a day old."""
-    snap = snap_path()
-    if not snap.exists() or time.time() - snap.stat().st_mtime > 86400:
-        try:
-            subprocess.run([str(HERMES_PY), str(Path(__file__).resolve()), "--snapshot"], cwd=HERMES / "hermes-agent",
-                           capture_output=True, timeout=600)
-        except (OSError, subprocess.TimeoutExpired) as e:
-            print("snapshot:", e, flush=True)
+    """Measures prompt and tools again for every analysed Hermes home whose snapshot is missing or a day old."""
+    for _, h in homes():
+        with at_home(h):
+            snap = snap_path()
+        if not snap.exists() or time.time() - snap.stat().st_mtime > 86400:
+            try:
+                subprocess.run([str(HERMES_PY), str(Path(__file__).resolve()), "--snapshot"], cwd=HERMES / "hermes-agent",
+                               capture_output=True, timeout=600, env={**os.environ, "USAGECAST_HOME": str(h)})
+            except (OSError, subprocess.TimeoutExpired) as e:
+                print("snapshot:", e, flush=True)
+
+
+def tg_status():
+    """10-minute step: the limits as the text of the bot's menu button, and one pinned status message edited in place."""
+    t, L = tg_target(), STATE["limits"]
+    if not t or not L or not SET["url"].startswith("https://"):
+        return
+    now, dest = time.time(), f'{SET["tg_bot"]}:{t[1]}:{t[2]}'
+    st = read_json(DATA / "tg.json") or {}
+    st = st if st.get("dest") == dest else {"dest": dest}   # another bot, chat or topic: start over there
+    old = dict(st)
+    win = {k: (u, frac, reset) for k, u, frac, reset, _ in windows(L, now)}
+    wk, fh = win.get("seven_day"), win.get("five_hour")
+    if not wk or not fh:
+        return
+    if SET["tg_menu"]:
+        text = tr("tg.menu.text", w=round(wk[0]), f=round(fh[0]))
+        if st.get("menu") != text and tg_call("setChatMenuButton", chat_id=t[1], menu_button={
+                "type": "web_app", "text": text, "web_app": {"url": SET["url"] + "/"}})[0]:
+            st["menu"] = text
+    if SET["tg_pin"]:
+        fc = week_forecast(wk[0], wk[1]) if wk[1] is not None else None
+        text = "\n".join((tr("tg.pin.week", w=round(wk[0]), fc=round(fc) if fc is not None else "–"),
+                          tr("tg.pin.five", f=round(fh[0]), at=hm(fh[2]) if fh[2] else "–"),
+                          tr("live.n", n=live()["n"]), tr("tg.pin.at", at=hm(now))))
+        if st.get("pin_text") != text:
+            ok, r = tg_call("editMessageText", chat_id=t[1], message_id=st["pin"], text=text, **tg_open(t)) if st.get("pin") else (False, "400 new")
+            ok = ok or "not modified" in str(r)
+            if not ok and str(r).startswith("400"):   # gone or never sent; a network error just waits for the next round
+                ok, r = tg_call("sendMessage", chat_id=t[1], **({"message_thread_id": int(t[2])} if t[2] else {}), text=text,
+                                disable_notification=True, **tg_open(t))
+                if ok:
+                    st["pin"] = r["message_id"]
+                    tg_call("pinChatMessage", chat_id=t[1], message_id=st["pin"], disable_notification=True)
+            if ok:
+                st["pin_text"] = text
+    if st != old:
+        DATA.mkdir(parents=True, exist_ok=True)
+        (DATA / "tg.json").write_text(json.dumps(st))
 
 
 def background():
@@ -1368,6 +1506,10 @@ def background():
         ensure_snap()
         refresh_limits(540)
         check_alerts()
+        try:
+            tg_status()
+        except Exception as e:  # noqa: BLE001 - the loop must keep running
+            print("telegram:", type(e).__name__, e, flush=True)
         guard()
         refresh_status()
         watch_config()
@@ -1385,6 +1527,8 @@ def snapshot():
     sys.path.insert(0, str(HERMES / "hermes-agent"))
     os.chdir(HERMES / "hermes-agent")
     os.environ["USAGECAST_ROOT"] = str(HERMES)
+    if os.environ.get("USAGECAST_HOME"):
+        _req.home = Path(os.environ["USAGECAST_HOME"])   # the home ensure_snap() asked for
     os.environ["HERMES_HOME"] = str(source_home())   # a profile loads its own config, tools and SOUL.md
     from run_agent import AIAgent
     from agent.system_prompt import build_system_prompt
@@ -1414,7 +1558,7 @@ def snapshot():
 # ---------- HTML ----------
 e = html.escape
 STATIC = ROOT / "static"
-STATIC_FILES = {"style.css": "text/css; charset=utf-8", "haptics.js": "text/javascript; charset=utf-8", "manifest.webmanifest": "application/manifest+json",
+STATIC_FILES = {"style.css": "text/css; charset=utf-8", "haptics.js": "text/javascript; charset=utf-8", "app.js": "text/javascript; charset=utf-8", "manifest.webmanifest": "application/manifest+json",
                 "icon.svg": "image/svg+xml", "icon-180.png": "image/png", "icon-192.png": "image/png", "icon-512.png": "image/png"}
 ICONS = {  # 24 grid, stroke in currentColor
     "/": '<path d="M4 16a8 8 0 1 1 16 0"/><path d="M12 16l3.5-4.5"/>',
@@ -1510,6 +1654,78 @@ def meter(u, frac=None, hot=False, left=False):
     return f'<div class="meter{" hot" if hot else ""}"><i style="width:{min(max(w, 0), 100):.1f}%"></i>{mark}</div>'
 
 
+LIVE_MAX = 900   # s; a busy mark older than this is a run that died, not one that works
+
+
+def live(now=None, hs=None):
+    """Agents at work right now. While a turn runs, Hermes keeps an activity text on the session ("tool running:
+    terminal") and clears it at the end; subagents are sessions with a parent. Plus the gateway and the next cron runs."""
+    now = now or time.time()
+    runs = []
+    for a, h in hs or homes():
+        with at_home(h):
+            try:
+                c, ttl = connect(), cache_ttl()
+                rows = c.execute("""select id, source, title, parent_session_id, last_activity_description, started_at, model,
+                    input_tokens, cache_read_tokens, cache_write_tokens, output_tokens from sessions where ended_at is null
+                    and coalesce(last_activity_description, '') != '' and last_activity_at > ? order by started_at""",
+                                 (now - LIVE_MAX,)).fetchall()
+                for sid, src, title, parent, what, started, model, i, r, w, o in rows:
+                    turn = c.execute("select max(timestamp) from messages where session_id = ? and role = 'user'", (sid,)).fetchone()[0]
+                    runs.append(dict(id=sid, agent=a, src=src, title=title, parent=parent, what=what, since=turn or started or now,
+                                     cost=sum(row_cost(model or "", i or 0, r or 0, w or 0, o or 0, ttl))))
+            except sqlite3.Error:
+                pass   # no state.db yet, or an older Hermes without the activity columns
+    gw, up, down = read_json(HERMES / "gateway_state.json"), None, []
+    if isinstance(gw, dict):
+        try:
+            os.kill(int(gw.get("pid")), 0)
+            up = gw.get("gateway_state") == "running"
+        except PermissionError:
+            up = gw.get("gateway_state") == "running"
+        except (TypeError, ValueError, OSError):
+            up = False
+        down = sorted(k for k, v in (gw.get("platforms") or {}).items()
+                      if isinstance(v, dict) and (v.get("state") != "connected" or v.get("needs_attention")))
+    nxt = []
+    for j in all_jobs() if hs is None else ():
+        try:
+            t = datetime.fromisoformat(j["next_run_at"]).timestamp()
+        except (KeyError, TypeError, ValueError):
+            continue
+        if j.get("enabled", True) and j.get("state") == "scheduled" and not j.get("no_agent") and t > now:
+            nxt.append((t, j.get("name") or ""))
+    return dict(runs=runs, n=sum(r["src"] != "subagent" for r in runs), up=up, down=down, next=sorted(nxt)[:3], at=now)
+
+
+def live_card(L, p):
+    """"Right now" on the overview: who works on what, for how long, and what that session has cost so far. /live
+    serves the card alone; static/app.js swaps it every few seconds while the page is in view."""
+    ids = {r["id"] for r in L["runs"]}
+    kids = defaultdict(list)
+    for r in L["runs"]:
+        if r["src"] == "subagent" and r["parent"] in ids:
+            kids[r["parent"]].append(r)
+    multi = len(homes()) > 1
+
+    def row(r, sub=""):
+        meta = [e(agent_label(r["agent"])) if multi and not sub else "", "" if sub else e(origin_label(origin(r["src"], r["title"]))),
+                e((r["what"] or "")[:48]), tr("live.for", d=dur(L["at"] - r["since"]))]
+        return (f'<a class="job{sub}" href="/s/{quote(r["id"])}?p={e(p)}"><span class="run"><span class="fname">{e((r["title"] or tr("untitled"))[:70])}</span>'
+                f'<span class="why">{" · ".join(x for x in meta if x)}</span></span><span class="v">{money(r["cost"])}</span></a>'
+                + "".join(row(k, " sub") for k in kids[r["id"]]))
+
+    tops = [r for r in L["runs"] if not (r["src"] == "subagent" and r["parent"] in ids)]
+    subs = len(L["runs"]) - len(tops)
+    head = (tr("live.n", n=L["n"]) + (" · " + tr("live.subs", n=subs) if subs else "")) if L["runs"] else tr("live.none")
+    notes = [tr("live.gw.off")] if L["up"] is False else [tr("live.gw.down", names=e(", ".join(L["down"])))] if L["down"] else []
+    nxt = ", ".join(f"{e(n or tr('untitled'))} {hm(t)}" for t, n in L["next"])
+    return (f'<section class="card live" id="live" data-p="{e(p)}"><h2>{tr("live.h")}</h2><p class="state">{head}</p>'
+            + (f'<div class="jobs">{"".join(row(r) for r in tops)}</div>' if tops else "")
+            + "".join(f'<p class="hint hot">{x}</p>' for x in notes)
+            + (f'<p class="hint">{tr("live.next", list=nxt)}</p>' if nxt else "") + "</section>")
+
+
 def api_summary():
     """Compact JSON for widgets: limits with reset times, the week forecast and this limit week's cost."""
     fresh_limits()
@@ -1530,6 +1746,7 @@ def api_summary():
         est = overrun_usd((w or {}).get("forecast"))
         if est is not None:
             out["extra"]["estimate_usd"] = round(est, 2)   # credits the week would need at this pace
+    out["agents"] = live()["n"]
     d = data_for("w")
     out["week_cost_usd"] = round(d["total"], 2) if d["week"] else None
     return json.dumps(out)
@@ -1659,7 +1876,7 @@ def layout(title, active, p, h1, sub, body, tabs=True, keep=None):
            f'<button class="btn primary">{tr("range.go")}</button></form></details>')
     seg = f'<div class="periods"><nav class="seg" aria-label="{tr("aria.period")}">{seg}</nav>{rng}</div>' if tabs else ""
     foot = (tr("foot.limits", at=hm(STATE["ok"]) if STATE["ok"] else "–") + "<br>"
-            + f'<a href="/settings#push">{tr("foot.ntfy.on" if ntfy_target() else "foot.ntfy.off")}</a>')
+            + f'<a href="/settings#push">{tr("foot.ntfy.on" if push_on() else "foot.ntfy.off")}</a>')
     th = SET["theme"]
     metas = "".join(f'<meta name="theme-color" content="{c}"' + (f' media="(prefers-color-scheme: {m})"' if th == "system" else "") + ">"
                     for m, c in (("light", "#f7f6f4"), ("dark", "#141312")) if th in ("system", m))
@@ -1671,14 +1888,14 @@ def layout(title, active, p, h1, sub, body, tabs=True, keep=None):
         on = " class=on aria-current=true" if code == lang() else ""
         langs.append(f'<a href="{e(link(u.path, **q))}" hreflang="{code}" lang="{code}"{on}>{LOC[code]["lang.name"]}</a>')
     try:
-        v = int(max((STATIC / n).stat().st_mtime for n in ("style.css", "haptics.js")))
+        v = int(max((STATIC / n).stat().st_mtime for n in ("style.css", "haptics.js", "app.js")))
     except OSError:
         v = 0
     theme = f' data-theme="{th}"' if th != "system" else ""
     return f"""<!doctype html><html lang="{lang()}"{theme}><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,minimum-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover"><title>{e(title)}</title>
 <script>for(const t of["gesturestart","gesturechange"])addEventListener(t,e=>e.preventDefault())</script>
-<script type="module" src="/haptics.js?v={v}"></script>
+<script type="module" src="/haptics.js?v={v}"></script><script defer src="/app.js?v={v}"></script>
 <link rel="stylesheet" href="/style.css?v={v}"><link rel="icon" href="/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/icon-180.png"><link rel="manifest" href="/manifest.webmanifest">
 <meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes">
@@ -1732,14 +1949,42 @@ def since_for(p):
 
 
 REFRESHING = set()
+SAME = ("since", "until", "hourly", "ttl", "ttl_alt")   # equal in every part of a merged analysis
+
+
+def merge(d, *more):
+    """Adds the analyses of other Hermes homes into d: amounts add up, hour sets join, [count, $] lists add per place,
+    the ten heaviest results stay. Session ids differ between homes, so sessions simply join."""
+    def add(a, b):
+        for k, v in b.items():
+            if k not in a:
+                a[k] = v
+            elif isinstance(v, dict):
+                add(a[k], v)
+            elif isinstance(v, set):
+                a[k] |= v
+            elif isinstance(v, list):
+                a[k] = sorted(a[k] + v, reverse=True)[:10] if k == "heavy" else [x + y for x, y in zip(a[k], v)]
+            elif isinstance(v, (int, float)) and not isinstance(v, bool):
+                a[k] += v
+    for x in more:
+        add(d, {k: v for k, v in x.items() if k not in SAME})
+    return d
 
 
 def compute(p):
     who = SET["source"]
     try:
         since, week = since_for(p)
-        d = analyze(connect(), since, load_snap(), cache_ttl(), until=(custom(p) or (0, math.inf))[1])
-        d.update(week=week, p=p, at=time.time())
+        parts = []
+        for a, h in homes():   # every agent alone with its own logs, prompt and config, then added up
+            with at_home(h):
+                x = analyze(connect(), since, load_snap(), cache_ttl(), until=(custom(p) or (0, math.inf))[1])
+            for v in x["sess"].values():
+                v["agent"] = a
+            parts.append((a, h, x))
+        d = parts[0][2] if len(parts) == 1 else merge(copy.deepcopy(parts[0][2]), *(x for *_, x in parts[1:]))
+        d.update(week=week, p=p, at=time.time(), parts=parts)
         if SET["source"] != who:
             return d
         if p == "30":
@@ -1858,7 +2103,7 @@ def page_overview(p):
              ("", tr("kpi.sessions"), cnt(len(d["sess"])), tr("kpi.sessions.sub"))]
     kpi_html = "".join(f'<div class="kpi {c}"><span>{l}</span><b>{v}</b><small>{s}</small></div>' for c, l, v, s in kpis)
     tip_html = "".join(f'<div class="tip"><b>{e(t)}</b><p>{txt}</p><span class="gain">{tr("tip.saves", p=pct(sv, tot))}</span></div>'
-                       for sv, t, txt in tips(d, snap)) \
+                       for sv, t, txt in all_tips(d)) \
         or f'<p class="hint">{tr("ov.nothing")}</p>'
     where = sorted(d["where"].items(), key=lambda x: -x[1])
     models = sorted(d["models"].items(), key=lambda x: -x[1][2])
@@ -1867,17 +2112,23 @@ def page_overview(p):
         for i, (m, x) in enumerate(models, 1)) + "</ol></section>"
     if len(models) < 2 and all(known_model(m) for m, _ in models):
         models_html = ""   # one model at 100 % says nothing
+    agents = defaultdict(float)
+    for x in d["sess"].values():
+        agents[agent_label(x.get("agent", ""))] += x["cost"]
+    agents_html = (f'<section class="card"><h2>{tr("ov.agents")}</h2>'
+                   f'{bars(sorted(agents.items(), key=lambda x: -x[1]), tot, ttl, explain=False, n=8, soft=True, name_of=lambda k: (e(k), ""))}</section>'
+                   if len(d.get("parts", ())) > 1 else "")
     logged = tr("ov.logged", p=pc(d["logged"] / (d["n_steps"] or 1) * 100))
-    push = "" if ntfy_target() else f'<p class="hint pushoff">{tr("ov.push", url="/settings#push")}</p>'
+    push = "" if push_on() else f'<p class="hint pushoff">{tr("ov.push", url="/settings#push")}</p>'
     split = limit_split(limit_history(), d30["hours"], cc_calls(w["since"]), w["since"]) if w["week"] else None
-    body = f"""{limits_card(w["total"] if w["week"] else None, split)}{guard_note()}{push}
+    body = f"""{limits_card(w["total"] if w["week"] else None, split)}{live_card(live(), p)}{guard_note()}{push}
 <div class="kpis">{kpi_html}</div>
 <div class="grid g2">
 <section class="card"><h2>{tr("ov.eats")}</h2>
 {bars(ranked(d["comp"]), tot, ttl, n=10, p=p)}
 <details class="more"><summary>{tr("det.how")}</summary><p class="why">{tr("ov.eats.hint")}</p><p class="why">{logged}</p></details></section>
 <div class="col"><section class="card"><h2>{tr("ov.where")}</h2>{bars(where, tot, ttl, explain=False, n=8, soft=True, name_of=lambda k: (origin_label(k), ""))}</section>
-{models_html}</div></div>
+{agents_html}{models_html}</div></div>
 <section class="sec"><h2>{tr("ov.save")}</h2>
 <p class="hint">{tr("ov.save.hint")}</p>
 <div class="tips">{tip_html}</div></section>"""
@@ -2171,15 +2422,22 @@ def page_details(p):
     return layout(tr("nav.details") + " · Usagecast", "/details", p, tr("nav.details"), tr("sub.details", src=source_name(), period=period_text(d)), body)
 
 
+def all_jobs():
+    """Every cron job of the analysed Hermes homes (dicts from cron/jobs.json), "_agent" = the profile it belongs to."""
+    out = []
+    for a, h in homes():
+        try:
+            jobs = json.loads((h / "cron" / "jobs.json").read_text())
+            jobs = jobs.get("jobs", []) if isinstance(jobs, dict) else jobs
+            out += [{**j, "_agent": a} for j in jobs if isinstance(j, dict)]
+        except (OSError, ValueError, AttributeError, TypeError):
+            pass
+    return out
+
+
 def cron_list():
-    """Recurring cron jobs of the analysed Hermes that are not finished (dicts from cron/jobs.json); one-shot jobs are
-    left out, they end on their own."""
-    try:
-        jobs = json.loads((source_home() / "cron" / "jobs.json").read_text())
-        jobs = jobs.get("jobs", []) if isinstance(jobs, dict) else jobs
-    except (OSError, ValueError, AttributeError):
-        return []
-    return [j for j in jobs if isinstance(j, dict) and isinstance(j.get("id"), str) and j.get("state") != "completed"
+    """Recurring cron jobs that are not finished; one-shot jobs are left out, they end on their own."""
+    return [j for j in all_jobs() if isinstance(j.get("id"), str) and j.get("state") != "completed"
             and (j.get("repeat") or {}).get("times") is None]
 
 
@@ -2225,12 +2483,11 @@ def guard():
     if not pause and not resume and held == set(state.get("paused", [])):
         return
     exe = shutil.which("hermes") or str(HERMES / "hermes-agent" / "venv" / "bin" / "hermes")
-    prof = ["-p", SET["source"]] if source_home() != HERMES else []
     done = {"pause": [], "resume": []}
     for act, ids in (("pause", pause), ("resume", resume)):
         for j in ids:
             try:
-                r = subprocess.run([exe, *prof, "cron", act, j], capture_output=True, text=True, timeout=120)
+                r = subprocess.run([exe, *(["-p", jobs[j]["_agent"]] if jobs.get(j, {}).get("_agent") else []), "cron", act, j], capture_output=True, text=True, timeout=120)
                 if r.returncode == 0:
                     done[act].append(j)
                 else:
@@ -2252,12 +2509,8 @@ def guard_note():
 
 
 def cron_jobs(d, p):
-    try:
-        jobs = json.loads((source_home() / "cron" / "jobs.json").read_text())
-        jobs = jobs.get("jobs", []) if isinstance(jobs, dict) else jobs
-        sched = {j.get("name"): j.get("schedule_display") or (j.get("schedule") or {}).get("display") or "" for j in jobs}
-    except (OSError, ValueError, AttributeError):
-        sched = {}
+    sched = {j.get("name"): j.get("schedule_display") or (j.get("schedule") if isinstance(j.get("schedule"), dict) else {}).get("display") or ""
+             for j in all_jobs()}
     g, days = cron_costs(d)
     rows = sorted(g.items(), key=lambda kv: -kv[1][1])
     s = sum(c for _, (_, c) in rows)
@@ -2271,6 +2524,8 @@ def cron_jobs(d, p):
 
 def page_sessions(p, q):
     d = data_for(p)
+    multi = len(d.get("parts", ())) > 1
+    who = lambda x: (e(agent_label(x.get("agent", ""))) + " · ") if multi else ""
     tot = d["total"] or 1
     arg = lambda k: (q.get(k) or [""])[0].strip()
     view, src, proj, term = arg("view"), arg("src"), arg("proj"), arg("q")
@@ -2294,7 +2549,7 @@ def page_sessions(p, q):
         flt += f'<p class="hint">{tr("ses.only_project", name=e(proj_label(proj)), clear=clear)}</p>'
     s_cost = sum(x["cost"] for _, x in rows)
     trs = [(f'<a href="/s/{quote(s)}?p={p}">{e((x["title"] or tr("untitled"))[:80])}</a>'
-             f'<span class="why">{e(origin_label(x["origin"]))} · {when(x["last"], "daytime")}</span>',
+             f'<span class="why">{who(x)}{e(origin_label(x["origin"]))} · {when(x["last"], "daytime")}</span>',
             e(proj_label(x["project"] or NO_PROJ)) if x["project"] else "–", cnt(x["calls"]), money(x["cost"]), pct(x["cost"], tot),
             f'<span class="why">{e(label(x["top"], d["ttl"])[0])}</span>') for s, x in rows[:200]]
     body = f"""{flt}
@@ -2324,10 +2579,15 @@ def page_projects(p):
 
 
 def page_session(sid, p):
-    ttl, c = cache_ttl(), connect()
-    d = analyze(c, 0, load_snap(), ttl, sid=sid)
+    for a, h in homes():   # the session lives in one of the homes
+        with at_home(h):
+            ttl = cache_ttl()
+            d = analyze(connect(), 0, load_snap(), ttl, sid=sid)
+        if d["sess"]:
+            break
     if not d["sess"]:
         return None
+    pre = f"-p {e(a)} " if a else ""
     x = d["sess"][sid]
     tot = d["total"] or 1
     rb = [s for s in d["steps"] if s[4]]
@@ -2338,11 +2598,11 @@ def page_session(sid, p):
               f'{money(r)} <span class="why">{tr("ses.after_pause") if kind == "rebuild" else tr("ses.no_pause") + " · " + tr("brk." + kind[6:])}</span>'
               if kind else "",
               f'<span class="why">{brk(names(keys))}</span>') for t, ctx, cost, r, kind, keys in d["steps"]]
-    sub = " · ".join([f'<a href="{link("/sessions", p=p)}">{tr("ses.back")}</a>', e(origin_label(x["origin"])),
+    sub = " · ".join([f'<a href="{link("/sessions", p=p)}">{tr("ses.back")}</a>', *([e(agent_label(a))] if len(homes()) > 1 else []), e(origin_label(x["origin"])),
                       tr("ses.project", name=e(proj_label(x["project"] or NO_PROJ))),
                       tr("ses.started", at=when(x["started"] or 0, "datetime")), tr("ses.steps", n=cnt(x["calls"])), money(x["cost"])])
     logged = tr("ses.logged", p=pc(d["logged"] / d["n_steps"] * 100)) if d["n_steps"] else ""
-    body = f"""<p class="hint">{tr("ses.resume")} <code class="cmd">hermes --resume {e(sid)}</code></p>
+    body = f"""<p class="hint">{tr("ses.resume")} <code class="cmd">hermes {pre}--resume {e(sid)}</code></p>
 <section class="card"><h2>{tr("ses.eats")}</h2>
 {bars(ranked(d["comp"], group_skills=False), tot, ttl, explain=False, n=40)}</section>
 <section class="sec"><h2>{tr("ses.steps_h")}</h2>
@@ -2452,8 +2712,8 @@ def page_settings(q):
                         for h, x in hosts.items())
         machines += field("ingest_hosts", T("ing.hosts"), "", "" if hosts else T("ing.none")) + (f'<div class="jobs">{lines}</div>' if hosts else "")
     ps, main = profiles(), tr("set.src.main", path=e(str(HERMES)))
-    source = (field("source", T("src.label"), select("source", [("", main), *((x, e(x)) for x in ps)],
-                                                     s["source"] if s["source"] in ps else ""), T("src.why")) if ps
+    source = (field("source", T("src.label"), select("source", [(ALL, T("src.all")), ("", main), *((x, e(x)) for x in ps)],
+                                                     s["source"] if s["source"] in (ALL, *ps) else ""), T("src.why")) if ps
               else field("source", T("src.label"), f'<span class="why">{main}</span>', T("src.none")))
     alerts_ = (f'<h3>{T("ag.limits")}</h3>' + field("alert_five", T("a.five"), five, T("a.five.why"))
                + field("alert_week", T("a.week"), check("alert_week"), T("a.week.why"))
@@ -2467,8 +2727,8 @@ def page_settings(q):
                + field("alert_spike", T("a.spike"), check("alert_spike") + share("spike_pct"), T("a.spike.why") + nok)
                + f'<h3>{T("ag.digest")}</h3>' + field("alert_digest", T("a.digest"), check("alert_digest"), T("a.digest.why")) + field("quiet", T("quiet"), quiet, T("quiet.why")))
     host, own = urlparse(s["ntfy_server"]).netloc, s["ntfy_server"] != "https://ntfy.sh"
-    target = ntfy_target()
-    state = (T("push.state.off") if not target else T("push.state.hermes") if s["push"] == "hermes"
+    target = push_on()
+    state = (T("push.state.off") if not target else T("push.state.hermes") if s["push"] == "hermes" else T("push.state.tg") if s["push"] == "telegram"
              else tr("set.push.state.own", server=e(host)))
     push = f'<p class="state"><strong>{state}</strong></p>{push_note}'
     if not s["ntfy_topic"]:
@@ -2483,11 +2743,11 @@ def page_settings(q):
                  + field("android", T("subscribe"), f'<a class="btn" id="android" href="{e(android)}">{T("android")}</a>', ios)
                  + field("newtopic", T("newtopic"), f'<button class="btn" id="newtopic" name="action" value="newtopic"'
                          f' data-q="{e(T("newtopic.confirm"))}" onclick="return confirm(this.dataset.q)">{T("newtopic.btn")}</button>', T("newtopic.why")))
-        push += f'<details class="adv"><summary>{T("own")}</summary>{own}</details>' if s["push"] == "hermes" else own   # Hermes sends, own topic waits
+        push += f'<details class="adv"><summary>{T("own")}</summary>{own}</details>' if s["push"] in ("hermes", "telegram") else own   # another channel sends, own topic waits
     if target:
         push += field("test", T("test"), f'<button class="btn" id="test" name="action" value="test">{T("test.btn")}</button>', T("test.why"))
     hermes_ok = hermes_ntfy() is not None
-    push += field("push", T("via"), opts("push", [(v, T("via." + v)) for v in CHOICES["push"]], () if hermes_ok else ("hermes",)),
+    push += field("push", T("via"), opts("push", [(v, T("via." + v)) for v in CHOICES["push"]], tuple(k for k, ok in (("hermes", hermes_ok), ("telegram", bool(tg_target()))) if not ok)),
                   T("via.why" if hermes_ok else "via.nohermes"))
     token = (f'<input type="password" id="ntfy_token" name="ntfy_token" placeholder="{T("token.saved") if s["ntfy_token"] else ""}"'
              f' autocomplete="new-password">' + (f'<label class="why"><input type="checkbox" name="token_clear"> {T("token.clear")}</label>'
@@ -2498,10 +2758,17 @@ def page_settings(q):
              + field("ntfy_token", T("token"), token, T("token.why")) + "</details>")
     push += field("url", T("url"), f'<input type="url" id="url" name="url" value="{e(s["url"])}" class="wide" placeholder="https://">'
                   f'<button class="btn" name="action" value="useurl">{T("useurl")}</button>', T("url.why"))
+    bots = [(n or "hermes", e(agent_label(n))) for n, h in [("", HERMES), *((x, HERMES / "profiles" / x) for x in profiles())]
+            if hermes_env("TELEGRAM_BOT_TOKEN", h)]
+    tgc = (field("tg_bot", T("tg.bot"), select("tg_bot", [("off", T("tg.bot.off")), *bots], s["tg_bot"]), T("tg.bot.why"))
+           + field("tg_thread", T("tg.thread"), f'<input id="tg_thread" name="tg_thread" value="{e(s["tg_thread"])}" inputmode="numeric"'
+                   f' pattern="[0-9]*" maxlength="12" autocomplete="off">', T("tg.thread.why"))
+           + field("tg_menu", T("tg.menu"), check("tg_menu"), T("tg.menu.why")) + field("tg_pin", T("tg.pin"), check("tg_pin"), T("tg.pin.why"))
+           + f'<p><button type="button" class="btn" id="tg-home" hidden>{T("tg.home")}</button></p>')   # static/app.js shows it in Telegram
     body = (f'{top}<form method="post" action="/settings" class="set">'
             '<button class="sr" name="action" value="save" tabindex="-1" aria-hidden="true"></button>'  # Enter in a field = save
             + card("look", T("look"), look) + card("limits", T("limits"), limits) + card("alerts", T("alerts"), alerts_, T("alerts.hint")) + card("guard", T("guard"), guard_, T("guard.hint")) + card("machines", T("ing"), machines, T("ing.hint"))
-            + card("push", T("push"), push, T("push.hint")) + card("source", T("src"), source)
+            + card("push", T("push"), push, T("push.hint")) + card("tg", T("tg"), tgc, T("tg.hint")) + card("source", T("src"), source)
             + f'<div class="save"><button class="btn primary" name="action" value="save">{T("save")}</button></div></form>')
     return layout(T("h1") + " · Usagecast", "/settings", s["period"], T("h1"), T("sub"), body, tabs=False)
 
@@ -2546,6 +2813,8 @@ class Handler(BaseHTTPRequestHandler):
                 body = page_session(unquote(path[3:]), p)
             elif path == "/settings":
                 body = page_settings(q)
+            elif path == "/live":
+                return self.send(live_card(live(), p).encode(), "text/html; charset=utf-8")
             elif path == "/api/summary":
                 return self.send(api_summary().encode(), "application/json")
             elif path == "/cc-report.py":
@@ -2727,7 +2996,46 @@ def demo():
     ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
 
 
+def selftest_v4():
+    """Merged homes add up; live() finds busy sessions, nests subagents, skips idle, dead and ended ones."""
+    _req.lang = "en"
+    a = {"comp": {"x": 1.0}, "hours": {0: {"x": 1.0}}, "hsess": {0: {"s"}}, "models": {"m": [1, 10, 1.0]},
+         "heavy": [(1.0, "a")], "sess": {"s": {}}, "steps": [], "total": 1.0, "since": 5, "hourly": True}
+    b = {"comp": {"x": 2.0, "y": 1.0}, "hours": {0: {"x": 3.0}}, "hsess": {0: {"t"}}, "models": {"m": [1, 10, 2.0]},
+         "heavy": [(2.0, "b")], "sess": {"t": {}}, "steps": [], "total": 3.0, "since": 5, "hourly": True}
+    m = merge(copy.deepcopy(a), b)
+    assert m["comp"] == {"x": 3.0, "y": 1.0} and m["hours"][0]["x"] == 4.0 and m["hsess"][0] == {"s", "t"}
+    assert m["models"]["m"] == [2, 20, 3.0] and m["heavy"][0] == (2.0, "b") and set(m["sess"]) == {"s", "t"}
+    assert m["total"] == 4.0 and m["since"] == 5 and m["hourly"] is True and a["total"] == 1.0
+    with tempfile.TemporaryDirectory() as tdir:
+        db = sqlite3.connect(Path(tdir) / "state.db")
+        db.executescript("""create table sessions (id, source, title, parent_session_id, last_activity_description,
+            last_activity_at, started_at, ended_at, model, input_tokens, cache_read_tokens, cache_write_tokens, output_tokens);
+            create table messages (session_id, role, timestamp);""")
+        t0 = time.time()
+        db.executemany("insert into sessions values (?,?,?,?,?,?,?,?,?,?,?,?,?)", [
+            ("a", "telegram", "Work", None, "tool running: terminal", t0 - 5, t0 - 600, None, "claude-opus-4", 1000, 0, 0, 100),
+            ("b", "subagent", "Sub", "a", "tool running: read_file", t0 - 5, t0 - 60, None, "claude-opus-4", 10, 0, 0, 1),
+            ("c", "telegram", "Idle", None, "", t0 - 5, t0 - 600, None, None, 0, 0, 0, 0),
+            ("d", "cli", "Dead", None, "tool running: x", t0 - 7200, t0 - 9000, None, None, 0, 0, 0, 0),
+            ("e", "cli", "Ended", None, "tool running: x", t0 - 5, t0 - 600, t0 - 1, None, 0, 0, 0, 0)])
+        db.execute("insert into messages values ('a', 'user', ?)", (t0 - 120,))
+        db.commit()
+        db.close()
+        L = live(t0, [("", Path(tdir))])
+        assert [r["id"] for r in L["runs"]] == ["a", "b"] and L["n"] == 1 and L["runs"][0]["since"] == t0 - 120
+        assert L["runs"][0]["cost"] > 0 and L["next"] == []
+        card_ = live_card(L, "w")
+        assert card_.count('<a class="job') == 2 and 'class="job sub"' in card_ and "{" not in card_
+        old_ = dict(SET)
+        SET.update(tg_bot="off", push="telegram")
+        assert tg_target() is None and send_push("t", "x")[0] is False and push_on() is False
+        SET.clear(); SET.update(old_)
+        assert "live." not in live_card(dict(runs=[], n=0, up=False, down=[], next=[(t0, "x")], at=t0), "w")
+
+
 def selftest():
+    selftest_v4()
     global HERMES, DATA, CLAUDE
     SET.clear(); SET.update(DEFAULTS); FX.clear(); FC.clear()   # the installed settings must not change the expected formats
     # Locales: same keys and placeholders everywhere, every literal key used in the code exists
@@ -2901,7 +3209,7 @@ def selftest():
         db.backup(pdb := sqlite3.connect(HERMES / "profiles" / "work" / "state.db"))
         pdb.close()
         assert profiles() == ["work"] and clean({"source": "work"}, SET)["source"] == "work"
-        assert clean({"source": "../x"}, SET)["source"] == clean({"source": "junk"}, SET)["source"] == ""
+        assert clean({"source": "../x"}, SET)["source"] == clean({"source": "junk"}, SET)["source"] == SET["source"]
         SET["source"] = "work"
         assert source_home() == HERMES / "profiles" / "work" and snap_path().name == "snapshot-work.json"
         assert fix("tools", "list") == '<code class="cmd fix">hermes -p work tools list</code>' and "work" in source_name()

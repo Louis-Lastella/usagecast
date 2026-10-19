@@ -311,3 +311,5 @@ th,td{padding:10px 10px}.o{display:none}
 @media (max-width:370px){.periods{flex-wrap:wrap}.periods .seg{flex-basis:100%}details.range form{left:0;right:auto}}
 @media (max-width:400px){th,td{padding:9px 6px}td:first-child,th:first-child{padding-left:12px}td:last-child,th:last-child{padding-right:12px}}
 @media (prefers-reduced-motion:reduce){*,::before,::after{animation:none!important;transition:none!important}}
+.live .job{color:inherit;text-decoration:none;align-items:flex-start}.live .job.sub{padding-left:18px}.live .run{display:flex;flex-direction:column;gap:2px;min-width:0}.live .run .why{margin:0;text-align:left}.live .job>.v{margin-left:auto;white-space:nowrap;font-variant-numeric:tabular-nums}.live .state{margin:0 0 12px}
+@media (max-width:860px){html.tg main{padding-top:calc(var(--tg-safe-area-inset-top,0px) + var(--tg-content-safe-area-inset-top,0px) + 14px)}html.tg aside{padding-bottom:calc(5px + max(env(safe-area-inset-bottom),var(--tg-safe-area-inset-bottom,0px)))}}

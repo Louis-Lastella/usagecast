@@ -135,6 +135,18 @@ das Topic und folgst den drei Schritten dort. „Test senden“ zeigt sofort die
 ntfy-Server mit Zugangs-Token geht auch, ebenso Hermes' ntfy-Kanal (`NTFY_HOME_CHANNEL`, `NTFY_SERVER_URL`, `NTFY_TOKEN`
 in `~/.hermes/.env`). `USAGECAST_NTFY` (volle URL mit Topic) setzt einen Standard ohne die Einstellungsseite.
 
+## Telegram-Mini-App
+
+Mit einem Hermes-Telegram-Bot läuft Usagecast auch in Telegram. Den Menü-Knopf des Bots per BotFather oder mit
+`setChatMenuButton` (Typ `web_app`) auf das Dashboard zeigen lassen, unter einer https-Adresse, die das Handy erreicht,
+zum Beispiel über Tailscale. Dort geöffnet nutzt es Telegrams Haptik und Zurück-Knopf, übernimmt die Farben, läuft auf
+dem Handy im Vollbild und bietet in den Einstellungen „Zum Home-Bildschirm“ an.
+
+Auf `/settings` wählt die Karte Telegram, welches Hermes den Bot stellt (Token und Chat aus dessen `.env`:
+`TELEGRAM_BOT_TOKEN`, `TELEGRAM_HOME_CHANNEL`), und auf Wunsch ein Thema. Dann gehen Warnungen an Telegram (Push über
+Telegram) mit einem Knopf „Öffnen“, der Menü-Knopf zeigt die Limits (`W 16% · 5h 68%`), und eine angepinnte Nachricht
+hält Woche, 5-Stunden-Fenster und arbeitende Agenten alle 10 Minuten aktuell.
+
 ## Widgets (iPhone, Home- und Sperrbildschirm)
 
 `widget/usagecast-widget.js` ist ein Skript für [Scriptable](https://scriptable.app), das Wochenlimit und

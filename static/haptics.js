@@ -6,8 +6,12 @@
 // Other phones use navigator.vibrate where it exists (Android). The system setting for haptics still applies.
 const SEL = "nav a, a.gear, a.btn, button:not(.sr), summary, .set input[type=checkbox], .set input[type=radio]"
 const ios = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
+let tg = false   // opened as a Telegram Mini App: app.js uses Telegram's own haptics instead
+try { tg = location.hash.includes("tgWebAppData") || !!sessionStorage.getItem("__telegram__initParams") } catch (e) {}
 
-if (!ios) {
+if (tg) {
+  // nothing to do here
+} else if (!ios) {
   if (navigator.vibrate) addEventListener("click", e => { if (e.isTrusted && e.target.closest(SEL)) navigator.vibrate(8) })
 } else {
   // One hidden switch outside every control: its copy of the tap must not bubble through a button (that submitted twice).
