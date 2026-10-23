@@ -2,6 +2,13 @@
 
 Versions follow [Semantic Versioning](https://semver.org).
 
+## 3.3.0 - 2026-10-23
+
+- Subagents are measured per chat: a session page lists the subagents it started (their own subagents included) with
+  steps, real cost and share, adds them as a "Subagents" part to what ate the session and shows the cost with them in
+  the header. A subagent's page and its row in the session list name the session that started it, with a link; the
+  list shows how many subagents a session started and what they cost in the period.
+
 ## 3.2.2 - 2026-10-19
 
 - Telegram: back to one pinned status in the chat itself. The per-topic pins of 3.2.1 are gone; they were not wanted

@@ -28,7 +28,7 @@ Try it without Hermes: `python3 app.py --demo` starts it on a month of made-up d
 | `/` | Limits with pace, daily budget and forecast, key figures with the change against last week, what eats the most, origins, models, tips |
 | `/history` | Cost per day by the biggest items with markers for Hermes updates and config changes, this week laid over the three before, heatmap by weekday and hour, activity calendar, day-by-day table |
 | `/details` | Every tool, skill, plugin, system prompt part and tool description on its own, cache breaks with their likely cause, the ten most expensive single tool results |
-| `/sessions` | Most expensive sessions with origin and last activity under each title, one filter row and search; the cron chip shows cost per run and per week. A session page shows every step and the `hermes --resume <id>` command |
+| `/sessions` | Most expensive sessions with origin and last activity under each title, one filter row and search; the cron chip shows cost per run and per week. A session page shows every step, the subagents it started with their cost, and the `hermes --resume <id>` command |
 | `/projects` | Cost per project, tap one to see its sessions |
 | `/settings` | Appearance, limits display, alerts and push setup |
 | `/api/summary` | Limits, forecast and this limit week's cost as JSON, for widgets |

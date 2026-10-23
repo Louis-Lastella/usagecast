@@ -28,7 +28,7 @@ Ohne Hermes ausprobieren: `python3 app.py --demo` startet es mit einem Monat erf
 | `/` | Limits mit Tempo, Tagesbudget und Prognose, Kennzahlen mit Vergleich zur Vorwoche, Rangliste was am meisten frisst, Herkunft, Modelle, Spartipps |
 | `/history` | Kosten pro Tag nach den größten Posten mit Markern für Hermes-Updates und Config-Änderungen, diese Woche über den drei davor, Heatmap nach Wochentag und Uhrzeit, Aktivitätskalender, Tagestabelle |
 | `/details` | Alle Tools, Skills, Plugins, Systemprompt-Teile und Tool-Beschreibungen einzeln, Cache-Brüche mit wahrscheinlicher Ursache, die zehn teuersten einzelnen Tool-Ergebnisse |
-| `/sessions` | Teuerste Sessions mit Herkunft und letzter Aktivität unter jedem Titel, einer Filterreihe und Suche; der Chip Cron-Jobs zeigt Kosten pro Lauf und Woche. Eine Session-Seite zeigt jeden Schritt und den Befehl `hermes --resume <id>` |
+| `/sessions` | Teuerste Sessions mit Herkunft und letzter Aktivität unter jedem Titel, einer Filterreihe und Suche; der Chip Cron-Jobs zeigt Kosten pro Lauf und Woche. Eine Session-Seite zeigt jeden Schritt, die gestarteten Subagenten mit ihren Kosten und den Befehl `hermes --resume <id>` |
 | `/projects` | Kosten pro Projekt, antippen zeigt die Sessions dazu |
 | `/settings` | Darstellung, Limit-Anzeige, Warnungen und Push-Einrichtung |
 | `/api/summary` | Limits, Prognose und Kosten der Limit-Woche als JSON, für Widgets |
