@@ -581,9 +581,10 @@ def analyze(c, since, snap, ttl, sid=None, logs=None, until=math.inf):
         usage[r[0]].append(r[1:])
     ids = list(usage)
     q = ",".join("?" * len(ids))
-    root = "git_repo_root" if "git_repo_root" in {r[1] for r in c.execute("pragma table_info(sessions)")} else "null"
+    cols = {r[1] for r in c.execute("pragma table_info(sessions)")}
+    root, par = (k if k in cols else "null" for k in ("git_repo_root", "parent_session_id"))
     meta = {r[0]: r[1:] for r in c.execute(
-        f"select id, source, title, system_prompt_hash, started_at, {root} from sessions where id in ({q})", ids)}
+        f"select id, source, title, system_prompt_hash, started_at, {root}, {par} from sessions where id in ({q})", ids)}
     prompts = dict(c.execute(f"""select hash, prompt from system_prompts where hash in
         (select system_prompt_hash from sessions where id in ({q}))""", ids))
     msgs = defaultdict(list)
@@ -602,7 +603,7 @@ def analyze(c, since, snap, ttl, sid=None, logs=None, until=math.inf):
     repos, prx = home_repos(), project_rx()
 
     for s, rows in usage.items():
-        src, title, hsh, started, repo_root = meta.get(s, ("?", None, None, 0, None))
+        src, title, hsh, started, repo_root, parent = meta.get(s, ("?", None, None, 0, None, None))
         sc, n_calls, turns, last = defaultdict(float), 0, [], [0.0]
 
         def put(k, v, t):
@@ -727,7 +728,7 @@ def analyze(c, since, snap, ttl, sid=None, logs=None, until=math.inf):
         where[org] += total_s
         top = max(sc.items(), key=lambda x: x[1])[0]
         sess[s] = dict(title=title, src=src, origin=org, calls=n_calls, cost=total_s, top=top, started=started, comp=dict(sc),
-                       turns=turns, last=last[0],
+                       turns=turns, last=last[0], parent=parent if src == "subagent" else None,
                        project=project_of((m[4] for m in msgs.get(s, ()) if m[4]), repos, prx, repo_root))
     # 5 min -> 1 h: rebuilds after pauses up to 1 h disappear, every write costs 2/1.25 = 1.6x. The other way round accordingly.
     if ttl <= 300:
@@ -2548,8 +2549,18 @@ def page_sessions(p, q):
         clear = f'<a href="{link("/sessions", p=p, src=src, q=term)}">{tr("ses.clear")}</a>'
         flt += f'<p class="hint">{tr("ses.only_project", name=e(proj_label(proj)), clear=clear)}</p>'
     s_cost = sum(x["cost"] for _, x in rows)
+    kids = defaultdict(lambda: [0, 0.0])   # session -> [subagents it started, their $ in the period]
+    for x in d["sess"].values():
+        if x.get("parent"):
+            kids[x["parent"]][0] += 1; kids[x["parent"]][1] += x["cost"]
+
+    def rel(s, x):
+        if x.get("parent"):
+            t = d["sess"].get(x["parent"], {}).get("title") or tr("untitled")
+            return " · " + tr("ses.by", parent=f'<a href="{link("/s/" + quote(x["parent"]), p=p)}">{e(t[:50])}</a>')
+        return " · " + tr("ses.subs", n=cnt(kids[s][0]), cost=money(kids[s][1])) if s in kids else ""
     trs = [(f'<a href="/s/{quote(s)}?p={p}">{e((x["title"] or tr("untitled"))[:80])}</a>'
-             f'<span class="why">{who(x)}{e(origin_label(x["origin"]))} · {when(x["last"], "daytime")}</span>',
+             f'<span class="why">{who(x)}{e(origin_label(x["origin"]))} · {when(x["last"], "daytime")}{rel(s, x)}</span>',
             e(proj_label(x["project"] or NO_PROJ)) if x["project"] else "–", cnt(x["calls"]), money(x["cost"]), pct(x["cost"], tot),
             f'<span class="why">{e(label(x["top"], d["ttl"])[0])}</span>') for s, x in rows[:200]]
     body = f"""{flt}
@@ -2578,18 +2589,37 @@ def page_projects(p):
     return layout(tr("nav.projects") + " · Usagecast", "/projects", p, tr("nav.projects"), tr("sub.projects", src=source_name(), period=period_text(d)), body)
 
 
+def subagents(c, sid, ttl):
+    """[(id, title, API calls, $)] of the subagents a session started, their own subagents included."""
+    if "parent_session_id" not in {r[1] for r in c.execute("pragma table_info(sessions)")}:
+        return []
+    out = []
+    for k, title in c.execute("""with recursive k(id) as (select id from sessions where parent_session_id = ? and source = 'subagent'
+            union select s.id from sessions s join k on s.parent_session_id = k.id where s.source = 'subagent')
+            select s.id, s.title from sessions s join k using (id) order by s.started_at""", (sid,)).fetchall():
+        rows = c.execute("""select model, api_call_count, input_tokens, cache_read_tokens, cache_write_tokens, output_tokens
+            from session_model_usage where session_id = ? and model like 'claude%'""", (k,)).fetchall()
+        out.append((k, title, sum(x[1] or 0 for x in rows), sum(sum(row_cost(m, i, r, w, o, ttl)) for m, _, i, r, w, o in rows)))
+    return out
+
+
 def page_session(sid, p):
     for a, h in homes():   # the session lives in one of the homes
         with at_home(h):
-            ttl = cache_ttl()
-            d = analyze(connect(), 0, load_snap(), ttl, sid=sid)
-        if d["sess"]:
-            break
+            ttl, c = cache_ttl(), connect()
+            d = analyze(c, 0, load_snap(), ttl, sid=sid)
+            if d["sess"]:
+                kids, pid = subagents(c, sid, ttl), d["sess"][sid].get("parent")
+                ptitle = pid and (c.execute("select title from sessions where id = ?", (pid,)).fetchone() or [None])[0]
+                break
     if not d["sess"]:
         return None
     pre = f"-p {e(a)} " if a else ""
     x = d["sess"][sid]
-    tot = d["total"] or 1
+    subs = sum(k[3] for k in kids)
+    if subs:
+        d["comp"]["sub"] = subs   # the subagents it started count as one more part of this session
+    tot = d["total"] + subs or 1
     rb = [s for s in d["steps"] if s[4]]
     short = lambda k: k.split(":", 1)[1] if k.startswith(("tool:", "skill:")) else label(k)[0]
     names = lambda keys: ", ".join(f"{short(k)}{f' ×{keys.count(k)}' if keys.count(k) > 1 else ''}" for k in dict.fromkeys(keys))
@@ -2599,13 +2629,22 @@ def page_session(sid, p):
               if kind else "",
               f'<span class="why">{brk(names(keys))}</span>') for t, ctx, cost, r, kind, keys in d["steps"]]
     sub = " · ".join([f'<a href="{link("/sessions", p=p)}">{tr("ses.back")}</a>', *([e(agent_label(a))] if len(homes()) > 1 else []), e(origin_label(x["origin"])),
+                      *([tr("ses.by", parent=f'<a href="{link("/s/" + quote(pid), p=p)}">{e((ptitle or tr("untitled"))[:60])}</a>')] if pid else []),
                       tr("ses.project", name=e(proj_label(x["project"] or NO_PROJ))),
-                      tr("ses.started", at=when(x["started"] or 0, "datetime")), tr("ses.steps", n=cnt(x["calls"])), money(x["cost"])])
+                      tr("ses.started", at=when(x["started"] or 0, "datetime")), tr("ses.steps", n=cnt(x["calls"])), money(x["cost"]),
+                      *([tr("ses.with_subs", cost=money(x["cost"] + subs))] if kids else [])])
+    ktab = ""
+    if kids:
+        trs = [(f'<a href="{link("/s/" + quote(k), p=p)}">{e((t or tr("untitled"))[:80])}</a>', cnt(n), money(v), pct(v, tot)) for k, t, n, v in kids]
+        ktab = f"""<section class="sec"><h2>{tr("ses.subs_h")}</h2>
+<p class="hint">{tr("ses.subs.hint", n=cnt(len(kids)), cost=money(subs), p=pct(subs, tot))}</p>
+{table(["th.session", "th.steps", "th.cost", "th.share"], trs, ("", "", "", ""), "titles")}</section>
+"""
     logged = tr("ses.logged", p=pc(d["logged"] / d["n_steps"] * 100)) if d["n_steps"] else ""
     body = f"""<p class="hint">{tr("ses.resume")} <code class="cmd">hermes {pre}--resume {e(sid)}</code></p>
 <section class="card"><h2>{tr("ses.eats")}</h2>
 {bars(ranked(d["comp"], group_skills=False), tot, ttl, explain=False, n=40)}</section>
-<section class="sec"><h2>{tr("ses.steps_h")}</h2>
+{ktab}<section class="sec"><h2>{tr("ses.steps_h")}</h2>
 <p class="hint">{tr("ses.steps.hint", n=len(rb), cost=money(sum(s[3] for s in rb)))} {logged}</p>
 {table(["th.time", "th.history", "th.cost", "th.rebuild", "th.tools"], steps, ("", "", "", "", "l"))}</section>"""
     title = x["title"] or tr("untitled")
@@ -2890,13 +2929,13 @@ def test_db(base=0.0):
             ("user", "go on", None, None, None, None, base + 1000.0, None),
             ("assistant", "ok", None, None, None, None, base + 1001.0, None)]
     db = sqlite3.connect(":memory:")
-    db.executescript("""create table sessions(id, source, title, system_prompt_hash, started_at, git_repo_root);
+    db.executescript("""create table sessions(id, source, title, system_prompt_hash, started_at, git_repo_root, parent_session_id);
         create table system_prompts(hash, prompt);
         create table messages(id integer primary key, session_id, role, content, api_content, tool_name, tool_calls,
             tool_call_id, timestamp, reasoning);
         create table session_model_usage(session_id, model, task, api_call_count, input_tokens, cache_read_tokens,
             cache_write_tokens, output_tokens, last_seen);""")
-    db.executemany("insert into sessions values(?, ?, ?, null, ?, null)",
+    db.executemany("insert into sessions values(?, ?, ?, null, ?, null, null)",
                    [("s", "telegram", "Test", base), ("c", "cron", "Daily report · Oct 08 16:31", base)])
     db.executemany("insert into session_model_usage values(?, 'claude-opus-5-5', ?, ?, ?, ?, ?, ?, ?)",
                    [("s", "", 3, 10, 5000, 3000, 400, base + 1001), ("s", "background_review", 1, 0, 2000, 500, 100, base + 1001),
@@ -2951,7 +2990,7 @@ def demo_db(now):
             if not calls:
                 continue
             read, write = sum(0 if cold else c - a for c, a, cold in calls), sum(c if cold else a for c, a, cold in calls)
-            db.execute("insert into sessions values(?, ?, ?, null, ?, null)", (sid, kind, title, rows[0][6]))
+            db.execute("insert into sessions values(?, ?, ?, null, ?, null, null)", (sid, kind, title, rows[0][6]))
             db.execute("insert into session_model_usage values(?, 'claude-opus-5-5', '', ?, ?, ?, ?, ?, ?)",
                        (sid, len(calls), 5 * len(calls), round(read), round(write), rnd.randint(150, 600) * len(calls), rows[-1][6]))
             db.executemany("""insert into messages(session_id, role, content, tool_name, tool_calls, tool_call_id, timestamp,
@@ -3201,6 +3240,9 @@ def selftest():
         HERMES, DATA = Path(tmp), Path(tmp) / "data"
         db, _ = test_db(time.time() - 3600)
         db.backup(disk := sqlite3.connect(Path(tmp) / "state.db"))
+        disk.execute("insert into sessions values ('k', 'subagent', 'Subagent: check', null, ?, null, 's')", (time.time() - 1800,))
+        disk.execute("insert into session_model_usage values ('k', 'claude-opus-5-5', '', 2, 10, 4000, 1000, 200, ?)", (time.time() - 1700,))
+        disk.commit()
         disk.close()
         STATE["at"] = time.time()  # no limit fetch during the test
         # Source: only a profile with its own state.db can be chosen, anything else keeps the old value
@@ -3294,7 +3336,8 @@ def selftest():
         assert "--token tk --install" in page_settings({"done": ["ingest"]}) and "--token TOKEN" in page_settings({})
         srv.shutdown()
         LAST_PUSH.update(at=time.time(), ok=False, reply="<x>")
-        assert abs(sum(day_costs().values()) - real) < 1e-9, (day_costs(), real)   # the calendar loses nothing
+        real_k = real + sum(row_cost("claude-opus-5-5", 10, 4000, 1000, 200, 300))   # plus the subagent of the test chat
+        assert abs(sum(day_costs().values()) - real_k) < 1e-9, (day_costs(), real_k)   # the calendar loses nothing
         cal = calendar({(datetime.now().date() - timedelta(days=1)).isoformat(): 2.0})
         assert cal.count('class="h4" title') == 1 and 2 <= cal.count("<i ") <= 14, cal[:200]   # a young install starts at its first week
         assert calendar({"2000-01-03": 1.0, datetime.now().date().isoformat(): 1.0}).count("<i ") >= 365 + 5   # at most a year
@@ -3316,6 +3359,13 @@ def selftest():
                          page_session("s", "7"), page_settings({"done": ["save"]}), page_settings({"done": ["test"]})]:
                 text = re.sub(r"<[^>]+>", " ", page)
                 assert not leftover.search(text) and "{" not in text, (code, leftover.search(text), text[:300])
+        # Subagents: the chat lists them with their real cost, the subagent links back, the list shows both ways
+        _req.lang = "en"
+        kc = money(sum(row_cost("claude-opus-5-5", 10, 4000, 1000, 200, cache_ttl())))
+        ps, pk, pl = page_session("s", "7"), page_session("k", "7"), page_sessions("7", {})
+        assert "Subagent: check" in ps and 'href="/s/k?p=7"' in ps and kc in ps and "with subagents" in ps and "Subagents (delegate_<wbr>task)" in ps, ps
+        assert 'started by <a href="/s/s?p=7">Test</a>' in pk and "with subagents" not in pk, pk
+        assert f"subagents: 1 · {kc}" in pl and 'started by <a href="/s/s?p=7">' in pl, pl
     assert "&lt;x&gt;" in page_settings({"done": ["test"]}) and 'data-theme="dark"' in page_settings({})
     # Extra credits: a drop in the counter starts a new month, steps come once per month and only the highest
     assert extra_months([{"t": i, "extra": v} for i, v in enumerate([None, 1.0, 2.5, 2.5, 0.0, 0.5, 3.0])]) == [[1, 2.5], [4, 3.0]]
