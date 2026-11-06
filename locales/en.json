@@ -296,6 +296,8 @@
   "det.breaks": "Why the cache broke without a pause",
   "det.breaks.hint": "Each break without a pause, sorted by its likely cause. The cost is the history that had to be written again.",
   "det.how.text": "Hermes stores the real token counts from Anthropic for every session: fresh input, read from cache, written to cache, output. Together with the official price list this gives the exact API value of every session. To split it up, every session is replayed step by step: what was in the history at that moment, what was new, and whether the cache had expired after a pause of more than {ttl}. Where Hermes' agent.log has real numbers for a step (total input and how much of it came from the cache), the real number counts, which also reveals cache breaks without a pause. In this period that applied to {p} of the steps. Sizes come from text length, images count as a flat amount, and everything is calibrated to the real numbers per session. Sums and total cost are exact, the split into single items is a good approximation.",
+  "det.long": "A step counts as long context when it reads more history than about 3 of 4 new chats need for their first task. The line is learned per agent from the last 30 days and kept between {lo} and {hi} tokens. While the weekly limit is at 80 % or heading for a tight week it stays at {lo}, since then every step counts. Now: {lines}.",
+  "det.long.learned": "(learned {n})",
 
   "cron.hint": "{n} cron jobs with cost in this period, {cost} in total ({p} of the period). Projected to a week: {week}. Jobs that only start a script without AI cost nothing and are not listed.",
   "ses.cron": "Cron jobs",

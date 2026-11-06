@@ -2,6 +2,14 @@
 
 Versions follow [Semantic Versioning](https://semver.org).
 
+## 3.4.0 - 2026-11-06
+
+- Long context is learned per agent: a step counts as long when it reads more history than about 3 of 4 new chats need
+  for their first task (last 30 days, cron jobs and subagents left out), kept between 100,000 and 200,000 tokens. While
+  the weekly limit is at 80 % or heading for a tight week the line stays at 100,000. Details names the line in force.
+- Tips no longer show twice with several agents: tips that read only the analysis (start fresh, cache breaks, one tool)
+  run once on the whole, and the same config tip of several agents becomes one card with a line and command per agent.
+
 ## 3.3.0 - 2026-10-23
 
 - Subagents are measured per chat: a session page lists the subagents it started (their own subagents included) with

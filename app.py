@@ -29,7 +29,8 @@ REPO_URL = "https://github.com/Louis-Lastella/usagecast"
 VERSION = (ROOT / "VERSION").read_text().strip() if (ROOT / "VERSION").is_file() else "dev"
 CPT = 3.5            # characters per token, only for proportions; amounts always come from the real token counts
 IMAGE_TOK = 3000     # one image in the history, same units (agent.log shows ~3,900 real tokens)
-LONG_CTX = 100_000   # a step that has to read more history than this counts as expensive
+LONG_CTX = 100_000   # a step that has to read more history than this counts as expensive; learned per agent up to 2x
+LONG = {}            # agent -> learned long-context line, set by compute("30")
 PERIODS = {"w": 7, "1": 1, "7": 7, "30": 30}   # days; "w" = since the weekly limit reset, 7 days without limit data
 DEFAULT_P = "w"
 
@@ -599,12 +600,13 @@ def analyze(c, since, snap, ttl, sid=None, logs=None, until=math.inf):
     models = defaultdict(lambda: [0.0, 0.0, 0.0])        # calls, tokens, $
     uses, sizes_acc = defaultdict(int), defaultdict(lambda: [0, 0.0])
     sess, steps, breaks, heavy = {}, [], defaultdict(lambda: [0, 0.0]), []   # breaks: cause -> [count, $]
-    tot = dict(calls=0.0, tokens=0.0, long=0.0, writes=0.0, avoid=0.0, extra=0.0, n_steps=0, logged=0)
+    ctxc = defaultdict(float)   # 10k context bucket -> $
+    tot = dict(calls=0.0, tokens=0.0, writes=0.0, avoid=0.0, extra=0.0, n_steps=0, logged=0)
     repos, prx = home_repos(), project_rx()
 
     for s, rows in usage.items():
         src, title, hsh, started, repo_root, parent = meta.get(s, ("?", None, None, 0, None, None))
-        sc, n_calls, turns, last = defaultdict(float), 0, [], [0.0]
+        sc, n_calls, turns, last, pk, ctx1 = defaultdict(float), 0, [], [0.0], [], 0
 
         def put(k, v, t):
             sc[k] += v
@@ -694,8 +696,8 @@ def analyze(c, since, snap, ttl, sid=None, logs=None, until=math.inf):
                 hsteps[t - t % 3600] += 1
                 tot["n_steps"] += 1; tot["logged"] += logged
                 ctx_tok = sum(now.values()) * kt
-                if ctx_tok > LONG_CTX:
-                    tot["long"] += cost
+                ctxc[int(ctx_tok) // 10_000 * 10_000] += cost
+                pk.append((t, ctx_tok))
                 # for the cache duration tip: what 1 h instead of 5 min (or the other way round) would have changed
                 tot["writes"] += (sum(new.values()) + lost) * fw
                 if kind == "rebuild" and gap <= 3600:
@@ -712,6 +714,8 @@ def analyze(c, since, snap, ttl, sid=None, logs=None, until=math.inf):
                 if sid:
                     steps.append((t, ctx_tok, cost, lost * fw, (kind + ":" + why if why else kind) if lost > 1e-9 else "", keys))
             turns = split_turns(tsteps, sorted(m[6] for m in msgs[s] if m[0] == "user"))
+            if turns and started > since:   # what a fresh task needed: peak context of the first turn
+                ctx1 = max(ct for t, ct in pk if t <= turns[0][1])
             for t, k, n in sizes:
                 if since < t <= until:
                     sizes_acc[k][0] += 1; sizes_acc[k][1] += n
@@ -728,7 +732,7 @@ def analyze(c, since, snap, ttl, sid=None, logs=None, until=math.inf):
         where[org] += total_s
         top = max(sc.items(), key=lambda x: x[1])[0]
         sess[s] = dict(title=title, src=src, origin=org, calls=n_calls, cost=total_s, top=top, started=started, comp=dict(sc),
-                       turns=turns, last=last[0], parent=parent if src == "subagent" else None,
+                       turns=turns, ctx1=ctx1, last=last[0], parent=parent if src == "subagent" else None,
                        project=project_of((m[4] for m in msgs.get(s, ()) if m[4]), repos, prx, repo_root))
     # 5 min -> 1 h: rebuilds after pauses up to 1 h disappear, every write costs 2/1.25 = 1.6x. The other way round accordingly.
     if ttl <= 300:
@@ -736,7 +740,7 @@ def analyze(c, since, snap, ttl, sid=None, logs=None, until=math.inf):
     else:
         ttl_save, ttl_alt = tot["writes"] * 0.375 - tot["extra"] * 0.625, 300
     return dict(comp=comp, where=where, models=models, hours=hours, hsteps=hsteps, hsess=hsess, sess=sess, steps=steps,
-                uses=uses, sizes=sizes_acc, breaks=dict(breaks), heavy=sorted(heavy, reverse=True)[:10], total=sum(comp.values()), ttl=ttl, ttl_alt=ttl_alt, ttl_save=ttl_save,
+                uses=uses, ctx=dict(ctxc), sizes=sizes_acc, breaks=dict(breaks), heavy=sorted(heavy, reverse=True)[:10], total=sum(comp.values()), ttl=ttl, ttl_alt=ttl_alt, ttl_save=ttl_save,
                 since=since, until=until, hourly=hourly, **tot)
 
 
@@ -862,18 +866,58 @@ def idle_sets(tools, sets, used):
     return sorted(((k, v) for k, v in cost.items() if k not in busy), key=lambda x: -x[1])
 
 
-def tips(d, snap):
-    """[(rough saving in $, title, html text)], biggest saving first; the overview shows the saving as % of the period."""
+def long_line(peaks):
+    """Learned long-context line of one agent: where 3 of 4 fresh tasks end (peak context of a chat's first turn),
+    rounded up to 10k, between LONG_CTX and 2x. LONG_CTX until there are 10 such tasks."""
+    if len(peaks) < 10:
+        return LONG_CTX
+    p = sorted(peaks)[len(peaks) * 3 // 4]
+    return min(max(-(-int(p) // 10_000) * 10_000, LONG_CTX), 2 * LONG_CTX)
+
+
+def week_tight():
+    """True while the weekly limit is at 80 % or heading for TIGHT: then every step counts and the line stays low."""
+    for key, u, frac, *_ in windows(STATE["limits"], time.time()):
+        if key == "seven_day":
+            return u >= 80 or (week_forecast(u, frac) or 0) >= TIGHT
+    return False
+
+
+def long_lines(d):
+    """[(agent, line in force, learned line)] of every agent in an analysis."""
+    t = week_tight()
+    return [(a, LONG_CTX if t else LONG.get(a, LONG_CTX), LONG.get(a, LONG_CTX)) for a, _, _ in d.get("parts") or [("", None, d)]]
+
+
+def shared_tips(d):
+    """Tips that read only the analysis, no agent config: on a merged analysis they cover every agent at once."""
     tot, out = d["total"] or 1, []
+    p = lambda v: pct(v, tot)
+    br = d["comp"].get("break", 0)
+    if br > 0.05 * tot:
+        out.append((br * 0.9, tr("tip.break"), tr("tip.break.text", p=p(br))))
+    ls = long_lines(d)
+    lng = sum(v for (_, _, x), (_, t, _) in zip(d.get("parts") or [("", None, d)], ls) for b, v in x["ctx"].items() if b >= t)
+    if lng > 0.2 * tot:
+        lo, hi = min(t for _, t, _ in ls), max(t for _, t, _ in ls)
+        out.append((lng / 2, tr("tip.long"), tr("tip.long.text", p=p(lng), n=nf(lo) if lo == hi else f"{nf(lo)}–{nf(hi)}")))
+    tl = sorted(((k, v) for k, v in d["comp"].items() if k.startswith("tool:")), key=lambda x: -x[1])
+    if tl and tl[0][1] > 0.08 * tot:
+        name = tl[0][0][5:]
+        hint = tr("tip.tool." + name) if name in TOOL_HINTS else tr("tip.tool.any", name=html.escape(name))
+        out.append((tl[0][1] / 3, tr("tip.tool", name=name), hint + " " + tr("tip.share", p=p(tl[0][1]))))
+    return out
+
+
+def tips(d, snap, shared=True):
+    """[(rough saving in $, title, html text)], biggest saving first; the overview shows the saving as % of the period."""
+    tot, out = d["total"] or 1, shared_tips(d) if shared else []
     p = lambda v: pct(v, tot)
     save = d["ttl_save"]
     if save > 0.03 * tot:
         key = "tip.ttl1h" if d["ttl_alt"] > 300 else "tip.ttl5m"
         out.append((save, tr(key), tr(key + ".text", p=p(save))
                     + fix("config", "set", "prompt_caching.cache_ttl", "1h" if key == "tip.ttl1h" else "5m")))
-    br = d["comp"].get("break", 0)
-    if br > 0.05 * tot:
-        out.append((br * 0.9, tr("tip.break"), tr("tip.break.text", p=p(br))))
     tools = snap.get("tools", {})
     used = {k.split(":", 1)[1] for k in d["uses"] if k.startswith("tool:")} | ({"skill_view"} if any(k.startswith("skill:") for k in d["uses"]) else set())
     st = sum(tools.values()) or 1
@@ -884,8 +928,6 @@ def tips(d, snap):
         idle = [k for k, _ in idle_sets(tools, snap.get("sets") or {}, used)][:6]
         cmd = fix("tools", "disable", "--platform", snap.get("platform") or "cli", *idle) if idle else ""
         out.append((s, tr("tip.unused"), tr("tip.unused.text", n=len(unused), p=p(s), top=top) + cmd))
-    if d["long"] > 0.2 * tot:
-        out.append((d["long"] / 2, tr("tip.long"), tr("tip.long.text", p=p(d["long"]), n=nf(LONG_CTX))))
     think = d["comp"].get("think", 0)
     effort = config_value("agent", "reasoning_effort")
     if think > 0.15 * tot and effort in EFFORTS[3:]:
@@ -897,11 +939,6 @@ def tips(d, snap):
         every = ((f"{a}.{b}", config_value(a, b) or "10") for a, b in (("skills", "creation_nudge_interval"), ("memory", "nudge_interval")))
         cmd = "".join(fix("config", "set", k, 2 * int(v)) for k, v in every if v.isdigit() and int(v))   # 0 = already off
         out.append((bg / 2, tr("tip.review"), tr("tip.review.text", p=p(bg)) + cmd))
-    tl = sorted(((k, v) for k, v in d["comp"].items() if k.startswith("tool:")), key=lambda x: -x[1])
-    if tl and tl[0][1] > 0.08 * tot:
-        name = tl[0][0][5:]
-        hint = tr("tip.tool." + name) if name in TOOL_HINTS else tr("tip.tool.any", name=html.escape(name))
-        out.append((tl[0][1] / 3, tr("tip.tool", name=name), hint + " " + tr("tip.share", p=p(tl[0][1]))))
     live = {j.get("name") or "" for j in cron_list()}   # finished one-shot jobs can't be run less often
     for org, v in sorted(d["where"].items(), key=lambda x: -x[1]):
         if org.startswith("cron:") and org[5:] in live and v > 0.05 * tot:
@@ -917,11 +954,17 @@ def tips(d, snap):
 
 def all_tips(d):
     """Tips of every agent in an analysis, each from its own prompt snapshot and with its own hermes -p command.
-    ponytail: a tip's share text is of its own agent's cost, the "saves" figure is of the whole."""
-    out = []
-    for _, h, x in d["parts"]:
+    Shared tips run once on the whole; the same own tip of several agents becomes one card with a line per agent.
+    ponytail: an own tip's share text is of its own agent's cost, the "saves" figure is of the whole."""
+    many, own = len(d["parts"]) > 1, {}
+    out = shared_tips(d) if many else []
+    for a, h, x in d["parts"]:
         with at_home(h):
-            out += tips(x, load_snap())
+            for sv, t, txt in tips(x, load_snap(), shared=not many):
+                own.setdefault(t, []).append((sv, a, txt))
+    for t, g in own.items():
+        txt = "<br>".join(f"<strong>{html.escape(agent_label(a))}:</strong> {x}" for _, a, x in g) if many else g[0][2]
+        out.append((sum(sv for sv, _, _ in g), t, txt))
     return sorted(out, key=lambda x: -x[0])
 
 
@@ -1989,6 +2032,8 @@ def compute(p):
         if SET["source"] != who:
             return d
         if p == "30":
+            LONG.update({a: long_line([v["ctx1"] for v in x["sess"].values() if v.get("ctx1") and v["src"] not in ("cron", "subagent")])
+                         for a, _, x in parts})
             r = limit_split(limit_history(30), d["hours"], cc_calls(since), since) or {}
             k, (ws, wk) = r.get("k"), since_for("w")
             u, cw = ((STATE["limits"] or {}).get("seven_day") or {}).get("utilization"), sum(
@@ -2390,6 +2435,9 @@ def page_details(p):
                          cnt(skill_uses if k == "tool:skill_view" else uses.get(k, 0)),
                          "–" if k == "tool:skill_view" else avg(k), money(v), pct(v, tot))
     how = tr("det.how.text", ttl=ttl_text(d["ttl"]), p=pc(d["logged"] / (d["n_steps"] or 1) * 100))
+    ls = long_lines(d)
+    how += " " + tr("det.long", lo=nf(LONG_CTX), hi=nf(2 * LONG_CTX), lines=", ".join(
+        (agent_label(a) + " " if len(ls) > 1 else "") + nf(t) + (" " + tr("det.long.learned", n=nf(m)) if m != t else "") for a, t, m in ls))
     hv = [(f'{brk(tool)}<span class="why">{when(t, "short")}</span>',
            f'<a href="/s/{quote(sid)}?p={quote(p)}">{e((d["sess"].get(sid, {}).get("title") or tr("untitled"))[:70])}</a>',
            num(n), tr("det.heavy.steps", n=cnt(later)), money(c)) for c, sid, tool, n, later, t in d["heavy"]]
@@ -3347,8 +3395,25 @@ def selftest():
             {"id": "j2", "name": "Once", "state": "scheduled", "repeat": {"times": 1}}]}))
         (DATA / "guard.json").write_text(json.dumps({"paused": ["j1"]}))
         assert [j["id"] for j in cron_list()] == ["j1"] and "Daily report" in guard_note() and clean({"gj_j1": "on", "gj_j2": "on"}, SET)["guard_jobs"] == ["j1"]
-        tp = [t for _, t, _ in tips(dict(total=1.0, ttl_save=0, comp={}, uses={}, long=0, where={"cron:Daily report": 0.5, "cron:Once": 0.5}), {})]
+        tp = [t for _, t, _ in tips(dict(total=1.0, ttl_save=0, comp={}, uses={}, ctx={}, where={"cron:Daily report": 0.5, "cron:Once": 0.5}), {})]
         assert tp == [tr("tip.cron", name="Daily report")], tp   # no "run it less often" for one-shot jobs
+        x1 = dict(total=1.0, ttl_save=0, comp={}, uses={}, ctx={}, where={"cron:Daily report": 0.5})
+        at = all_tips(dict(x1, parts=[("", None, x1), ("a", None, dict(x1))]))
+        assert len(at) == 1 and at[0][0] == 0.5 and at[0][2].count("<strong>") == 2, at   # one card for both agents
+        assert long_line([50_000] * 9) == LONG_CTX and long_line([50_000] * 20) == LONG_CTX   # too few tasks / small tasks
+        assert long_line(list(range(10_000, 160_001, 10_000))) == 130_000 and long_line([900_000] * 12) == 2 * LONG_CTX
+        _req.lang = "en"
+        two = dict(total=10.0, comp={"break": 1.0}, ctx={})
+        a1, a2 = dict(two, ctx={120_000: 2.0}), dict(two, ctx={120_000: 2.0, 160_000: 2.0})
+        LONG.update(a=150_000)
+        lim, STATE["limits"] = STATE["limits"], None
+        both = dict(total=15.0, comp={"break": 2.0}, ctx={}, parts=[("", None, a1), ("a", None, a2)])
+        tb = shared_tips(both)
+        assert [t for _, t, _ in tb].count(tr("tip.break")) == 1 and tb[1][0] == 2.0 and "100,000–150,000" in tb[1][2], tb   # one card each
+        STATE["limits"] = {"seven_day": {"utilization": 85, "resets_at": datetime.fromtimestamp(time.time() + 86400).isoformat()}}
+        assert week_tight() and shared_tips(both)[1][0] == 3.0   # a tight week keeps everyone at 100k
+        STATE["limits"] = lim
+        LONG.clear()
         leftover = re.compile(r"\b(?:th|set|cal|ovl|ev|brk|ov|lim|det|ses|hist|heat|nav|kpi|seg|src|proj|cron|period|since|fmt|num|tip|comp|label|alert|until|sub)\.[a-z_]")
         for code in LOC:
             _req.lang, _req.url = code, "/?p=7"
