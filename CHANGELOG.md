@@ -2,6 +2,18 @@
 
 Versions follow [Semantic Versioning](https://semver.org).
 
+## 3.5.0 - 2026-11-09
+
+- Bots & chats: one overview card replaces "Where it happens" and "By agent". One row per bot (an agent on one
+  platform, named by the bot itself, e.g. "Atlas · Telegram"), plus cron jobs and subagents per agent. Tapping a row
+  folds out its chats: Telegram topics, DMs and groups, Discord DMs, channels and threads, Slack threads and the like;
+  cron folds out its jobs, subagents the chats that started them. Every chat leads to its sessions.
+- A topic without a stored name takes it from another session of the same topic, else it shows as "Topic 13897".
+  Bot names come from Telegram `getMe`, Discord `users/@me` or Slack `auth.test` once a day (`data/bots.json`); without
+  a token the agent's name is used. Older Hermes databases without the chat columns still work.
+- Sessions: chips per bot (the cron chip still opens the job table, old `src=` links still filter), a chat filter with
+  a clear link, and "bot · chat" under every title, in the session header and in "Right now".
+
 ## 3.4.0 - 2026-11-06
 
 - Long context is learned per agent: a step counts as long when it reads more history than about 3 of 4 new chats need

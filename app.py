@@ -169,6 +169,43 @@ def agent_label(a):
     return a or "Hermes"
 
 
+def bot_key(x):
+    """A bot = an agent on one platform; cron runs and subagents count as one bot per agent."""
+    return f'{x.get("agent", "")}:{x.get("platform") or x.get("src") or "?"}'
+
+
+def bot_label(key):
+    """"Atlas · Telegram": the bot's own name (data/bots.json, see refresh_bots()), else the agent's name."""
+    a, _, plat = key.rpartition(":")
+    names = ((read_json(DATA / "bots.json") or {}).get("names") or {}).get(a) or {}
+    return f'{names.get(plat) or names.get("telegram") or next(iter(names.values()), None) or agent_label(a)} · {origin_label(plat)}'
+
+
+def chat_label(ch):
+    """(name, context) of a chat from chat_index(); the topic number or chat id only when no name is known."""
+    if ch["name"]:
+        return ch["name"], ch["ctx"] or (tr("chat.thread") if ch["n"] and ch["kind"] != "topic" else "")
+    if ch["kind"] == "topic":
+        return tr("chat.topic", n=ch["n"]), ch["ctx"]
+    return {"cron": tr("untitled"), "cli": tr("chat.cli")}.get(ch["kind"]) or ch["id"] or tr("chat.none"), ch["ctx"]
+
+
+def bot_chat(x):
+    """"Atlas · Telegram · Shop": the bot and chat of a session, unescaped."""
+    return f'{bot_label(bot_key(x))} · {chat_label(x.get("chat") or NOCHAT)[0]}'
+
+
+def by_bot(sess):
+    """{bot key: [$, {chat key: [$, chat, sessions]}]} of an analysis' sessions."""
+    g = defaultdict(lambda: [0.0, defaultdict(lambda: [0.0, NOCHAT, 0])])
+    for x in sess.values():
+        b, ch = g[bot_key(x)], x.get("chat") or NOCHAT
+        b[0] += x["cost"]
+        c = b[1][ch["key"]]
+        c[0] += x["cost"]; c[1] = ch; c[2] += 1
+    return g
+
+
 def source_name():
     hs = homes()
     if len(hs) > 1:
@@ -526,6 +563,46 @@ def origin(src, title):
     return src or "?"
 
 
+CHAT_COLS = ("source", "title", "parent_session_id", "chat_id", "chat_type", "thread_id", "display_name", "origin_json")
+NOCHAT = dict(key="?", name="", ctx="", kind="", n="", id="")
+
+
+def chat_index(c):
+    """{session id: (platform, chat)} of every session in a Hermes db. chat = dict(key, name, ctx, kind, n, id), names as
+    stored, no display text: key platform:chat_id:thread_id is stable, name is the Telegram topic or the last part of a
+    "Server / #channel / thread" name, ctx the rest (or the chat a topic lives in). A topic without a stored name takes
+    it from another session of the same topic. Cron sessions are their job, subagents get the chat that started them."""
+    cols = {r[1] for r in c.execute("pragma table_info(sessions)")}
+    raw, topics, out = {}, {}, {}
+    for sid, src, title, par, cid, ct, th, dn, oj in c.execute(
+            f"select id, {', '.join(k if k in cols else 'null' for k in CHAT_COLS)} from sessions order by started_at"):
+        try:
+            o = json.loads(oj) if oj else {}
+        except ValueError:
+            o = {}
+        o = o if isinstance(o, dict) else {}   # old rows have no origin_json: the plain columns are all there is
+        plat = src if src in ("cron", "subagent") else o.get("platform") or src or "?"
+        cid, th, ct = str(o.get("chat_id") or cid or ""), str(o.get("thread_id") or th or ""), o.get("chat_type") or ct or ""
+        if plat == "telegram" and th and o.get("chat_topic"):   # elsewhere chat_topic is the channel description
+            topics[(cid, th)] = o["chat_topic"]
+        raw[sid] = (src, title, par, plat, cid, ct, th, o.get("chat_name") or (dn if ct == "dm" else "") or "")
+    for sid, (src, title, par, plat, cid, ct, th, name) in raw.items():
+        if src == "cron":
+            out[sid] = (plat, dict(NOCHAT, key=origin(src, title), name=origin(src, title)[5:], kind="cron"))
+        elif plat == "telegram" and th:
+            out[sid] = (plat, dict(key=f"{plat}:{cid}:{th}", name=topics.get((cid, th), ""), ctx=name, kind="topic", n=th, id=cid))
+        else:
+            head, _, last = name.rpartition(" / ")
+            out[sid] = (plat, dict(key=f"{plat}:{cid}:{th}", name=last, ctx=head, kind=ct or ("cli" if plat == "cli" else ""), n=th, id=cid))
+    for sid, (src, _, par, *_r) in raw.items():
+        hops = 0
+        while src == "subagent" and par in raw and raw[par][0] == "subagent" and hops < 20:   # a subagent's subagent
+            par, hops = raw[par][2], hops + 1
+        if src == "subagent":
+            out[sid] = ("subagent", out[par][1] if par in raw and raw[par][0] != "subagent" else NOCHAT)
+    return out
+
+
 def floor(t, hourly):
     if hourly:
         return t - t % 3600
@@ -588,6 +665,7 @@ def analyze(c, since, snap, ttl, sid=None, logs=None, until=math.inf):
         f"select id, source, title, system_prompt_hash, started_at, {root}, {par} from sessions where id in ({q})", ids)}
     prompts = dict(c.execute(f"""select hash, prompt from system_prompts where hash in
         (select system_prompt_hash from sessions where id in ({q}))""", ids))
+    chats = chat_index(c)
     msgs = defaultdict(list)
     for r in c.execute(f"""select session_id, role, content, api_content, tool_name, tool_calls, tool_call_id,
             timestamp, reasoning from messages where session_id in ({q}) order by session_id, id""", ids):
@@ -731,7 +809,8 @@ def analyze(c, since, snap, ttl, sid=None, logs=None, until=math.inf):
         org = origin(src, title)
         where[org] += total_s
         top = max(sc.items(), key=lambda x: x[1])[0]
-        sess[s] = dict(title=title, src=src, origin=org, calls=n_calls, cost=total_s, top=top, started=started, comp=dict(sc),
+        platform, chat = chats.get(s, (src, NOCHAT))
+        sess[s] = dict(title=title, src=src, origin=org, platform=platform, chat=chat, calls=n_calls, cost=total_s, top=top, started=started, comp=dict(sc),
                        turns=turns, ctx1=ctx1, last=last[0], parent=parent if src == "subagent" else None,
                        project=project_of((m[4] for m in msgs.get(s, ()) if m[4]), repos, prx, repo_root))
     # 5 min -> 1 h: rebuilds after pauses up to 1 h disappear, every write costs 2/1.25 = 1.6x. The other way round accordingly.
@@ -1483,6 +1562,33 @@ STATUS_URL = "https://status.claude.com"
 STATUS = {}
 
 
+def refresh_bots(max_age=86400):
+    """Bot names for "Bots & chats": Telegram getMe, Discord users/@me, Slack auth.test with each home's token, at most
+    once a day into data/bots.json. A failure keeps the last name. Tokens stay in here: never logged, never shown."""
+    old = read_json(DATA / "bots.json") or {}
+    if time.time() - old.get("at", 0) < max_age:
+        return
+    names = old.get("names") or {}
+    for a, h in homes():
+        env = hermes_env("", h)
+        for plat, var, url, auth, pick in (
+                ("telegram", "TELEGRAM_BOT_TOKEN", "https://api.telegram.org/bot{t}/getMe", "", lambda j: j["result"]["first_name"]),
+                ("discord", "DISCORD_BOT_TOKEN", "https://discord.com/api/v10/users/@me", "Bot {t}", lambda j: j.get("global_name") or j["username"]),
+                ("slack", "SLACK_BOT_TOKEN", "https://slack.com/api/auth.test", "Bearer {t}", lambda j: j["user"])):
+            t = env.get(var)
+            if not t:
+                continue
+            hdr = {"User-Agent": f"DiscordBot (usagecast, {VERSION})", **({"Authorization": auth.format(t=t)} if auth else {})}
+            try:
+                req = urllib.request.Request(url.format(t=t), b"" if plat == "slack" else None, hdr)
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    names.setdefault(a, {})[plat] = str(pick(json.loads(r.read())))[:40]
+            except Exception:  # noqa: BLE001 - offline, bad token, odd reply: keep the old name; the error text may hold the URL
+                print("bots:", plat, agent_label(a), "name not fetched", flush=True)
+    DATA.mkdir(parents=True, exist_ok=True)
+    (DATA / "bots.json").write_text(json.dumps({"at": round(time.time()), "names": names}))
+
+
 def refresh_status():
     """Claude's public status page; an incident shows up as a line under the limits."""
     try:
@@ -1556,6 +1662,7 @@ def background():
             print("telegram:", type(e).__name__, e, flush=True)
         guard()
         refresh_status()
+        refresh_bots()
         watch_config()
         if SET["currency"] == "EUR":
             refresh_fx()
@@ -1651,7 +1758,12 @@ def table(head, rows, cls=(), tcls=""):
     return f'<div class="scroll"><table{f" class={tcls}" if tcls else ""}><tr>{h}</tr>{b}</table></div>'
 
 
-def bars(items, tot, ttl, explain=True, n=12, p=None, soft=False, name_of=None):
+def amount(v, tot):
+    return money(v) if SET["cost_unit"] == "week" and RATE.get("k") else f"{pct(v, tot)} · {money(v)}"
+
+
+def bars(items, tot, ttl, explain=True, n=12, p=None, soft=False, name_of=None, raw=False):
+    """raw: the why from name_of is HTML (the chats of a bot), not a sentence to escape."""
     if not items:
         return f'<p class="hint">{tr("nodata")}</p>'
     name_of = name_of or (lambda k: label(k, ttl))
@@ -1659,10 +1771,10 @@ def bars(items, tot, ttl, explain=True, n=12, p=None, soft=False, name_of=None):
     out = ""
     for k, v in items[:n]:
         name, why = name_of(k)
-        head = (f'<div class="row"><span>{brk(name)}</span><span class="v">{money(v) if SET["cost_unit"] == "week" and RATE.get("k") else f"{pct(v, tot)} · {money(v)}"}</span></div>'
+        head = (f'<div class="row"><span>{brk(name)}</span><span class="v">{amount(v, tot)}</span></div>'
                 f'<div class="t{" soft" if soft else ""}"><i style="width:{v / top * 100:.1f}%"></i></div>')
         if explain and why and (k in FIXED or not k.startswith("tool:")):   # the sentence for tools would repeat on every tool
-            out += f'<details class="bar"><summary>{head}</summary><div class="why">{e(why)}</div></details>'
+            out += f'<details class="bar"><summary>{head}</summary><div class="why">{why if raw else e(why)}</div></details>'
         else:
             out += f'<div class="bar">{head}</div>'
     rest = sum(v for _, v in items[n:])
@@ -1714,9 +1826,11 @@ def live(now=None, hs=None):
                     input_tokens, cache_read_tokens, cache_write_tokens, output_tokens from sessions where ended_at is null
                     and coalesce(last_activity_description, '') != '' and last_activity_at > ? order by started_at""",
                                  (now - LIVE_MAX,)).fetchall()
+                ci = chat_index(c) if rows else {}
                 for sid, src, title, parent, what, started, model, i, r, w, o in rows:
                     turn = c.execute("select max(timestamp) from messages where session_id = ? and role = 'user'", (sid,)).fetchone()[0]
-                    runs.append(dict(id=sid, agent=a, src=src, title=title, parent=parent, what=what, since=turn or started or now,
+                    plat, ch = ci.get(sid, (src, NOCHAT))
+                    runs.append(dict(id=sid, agent=a, src=src, platform=plat, chat=ch, title=title, parent=parent, what=what, since=turn or started or now,
                                      cost=sum(row_cost(model or "", i or 0, r or 0, w or 0, o or 0, ttl))))
             except sqlite3.Error:
                 pass   # no state.db yet, or an older Hermes without the activity columns
@@ -1750,11 +1864,9 @@ def live_card(L, p):
     for r in L["runs"]:
         if r["src"] == "subagent" and r["parent"] in ids:
             kids[r["parent"]].append(r)
-    multi = len(homes()) > 1
 
     def row(r, sub=""):
-        meta = [e(agent_label(r["agent"])) if multi and not sub else "", "" if sub else e(origin_label(origin(r["src"], r["title"]))),
-                e((r["what"] or "")[:48]), tr("live.for", d=dur(L["at"] - r["since"]))]
+        meta = ["" if sub else e(bot_chat(r)), e((r["what"] or "")[:48]), tr("live.for", d=dur(L["at"] - r["since"]))]
         return (f'<a class="job{sub}" href="/s/{quote(r["id"])}?p={e(p)}"><span class="run"><span class="fname">{e((r["title"] or tr("untitled"))[:70])}</span>'
                 f'<span class="why">{" · ".join(x for x in meta if x)}</span></span><span class="v">{money(r["cost"])}</span></a>'
                 + "".join(row(k, " sub") for k in kids[r["id"]]))
@@ -2151,19 +2263,25 @@ def page_overview(p):
     tip_html = "".join(f'<div class="tip"><b>{e(t)}</b><p>{txt}</p><span class="gain">{tr("tip.saves", p=pct(sv, tot))}</span></div>'
                        for sv, t, txt in all_tips(d)) \
         or f'<p class="hint">{tr("ov.nothing")}</p>'
-    where = sorted(d["where"].items(), key=lambda x: -x[1])
     models = sorted(d["models"].items(), key=lambda x: -x[1][2])
     models_html = f'<section class="card"><h2>{tr("ov.models")}</h2><ol class="rank">' + "".join(
         f'<li><span class="n">{i}</span><span class="m">{brk(m)}{"" if known_model(m) else " <small>" + tr("ov.estimated") + "</small>"}</span><span class="v">{money(x[2])}</span><b>{pct(x[2], tot)}</b></li>'
         for i, (m, x) in enumerate(models, 1)) + "</ol></section>"
     if len(models) < 2 and all(known_model(m) for m, _ in models):
         models_html = ""   # one model at 100 % says nothing
-    agents = defaultdict(float)
-    for x in d["sess"].values():
-        agents[agent_label(x.get("agent", ""))] += x["cost"]
-    agents_html = (f'<section class="card"><h2>{tr("ov.agents")}</h2>'
-                   f'{bars(sorted(agents.items(), key=lambda x: -x[1]), tot, ttl, explain=False, n=8, soft=True, name_of=lambda k: (e(k), ""))}</section>'
-                   if len(d.get("parts", ())) > 1 else "")
+    bots = by_bot(d["sess"])
+
+    def fold(k):   # a bot row opens to its top chats, each leading to its sessions
+        chats = sorted(bots[k][1].items(), key=lambda c: -c[1][0])
+        labs = [chat_label(ch) for _, (_, ch, _) in chats[:8]]
+        one = len({cx for _, cx in labs}) == 1   # every topic in the same DM: saying so on each line is noise
+        lis = "".join(f'<li><a href="{link("/sessions", p=p, bot=k, chat=ck)}"><span>{e(nm)}{f" <small>{e(cx)}</small>" if cx and not one else ""}</span>'
+                      f'<span class="v">{amount(v, tot)}</span></a></li>' for (ck, (v, _, _)), (nm, cx) in zip(chats, labs))
+        more = (f'<p class="hint"><a href="{link("/sessions", p=p, view="cron") if k.endswith(":cron") else link("/sessions", p=p, bot=k)}">'
+                f'{tr("ov.bots.all", n=cnt(len(chats)))}</a></p>' if len(chats) > 8 else "")
+        return bot_label(k), f'<ul class="chats">{lis}</ul>{more}'
+    bots_html = (f'<section class="card"><h2>{tr("ov.bots")}</h2>'
+                 f'{bars(sorted(((k, v[0]) for k, v in bots.items()), key=lambda x: -x[1]), tot, ttl, n=20, soft=True, name_of=fold, raw=True)}</section>')
     logged = tr("ov.logged", p=pc(d["logged"] / (d["n_steps"] or 1) * 100))
     push = "" if push_on() else f'<p class="hint pushoff">{tr("ov.push", url="/settings#push")}</p>'
     split = limit_split(limit_history(), d30["hours"], cc_calls(w["since"]), w["since"]) if w["week"] else None
@@ -2173,8 +2291,7 @@ def page_overview(p):
 <section class="card"><h2>{tr("ov.eats")}</h2>
 {bars(ranked(d["comp"]), tot, ttl, n=10, p=p)}
 <details class="more"><summary>{tr("det.how")}</summary><p class="why">{tr("ov.eats.hint")}</p><p class="why">{logged}</p></details></section>
-<div class="col"><section class="card"><h2>{tr("ov.where")}</h2>{bars(where, tot, ttl, explain=False, n=8, soft=True, name_of=lambda k: (origin_label(k), ""))}</section>
-{agents_html}{models_html}</div></div>
+<div class="col">{bots_html}{models_html}</div></div>
 <section class="sec"><h2>{tr("ov.save")}</h2>
 <p class="hint">{tr("ov.save.hint")}</p>
 <div class="tips">{tip_html}</div></section>"""
@@ -2573,29 +2690,32 @@ def cron_jobs(d, p):
 
 def page_sessions(p, q):
     d = data_for(p)
-    multi = len(d.get("parts", ())) > 1
-    who = lambda x: (e(agent_label(x.get("agent", ""))) + " · ") if multi else ""
     tot = d["total"] or 1
     arg = lambda k: (q.get(k) or [""])[0].strip()
-    view, src, proj, term = arg("view"), arg("src"), arg("proj"), arg("q")
+    view, src, bot, chat, proj, term = arg("view"), arg("src"), arg("bot"), arg("chat"), arg("proj"), arg("q")
     sub, cron = tr("sub.hermes", src=source_name(), period=period_text(d)), view == "cron"
     sel = [(s, x) for s, x in d["sess"].items() if (not proj or (x["project"] or NO_PROJ) == proj)
-           and (not term or term.lower() in (x["title"] or "").lower())]
-    counts = Counter(x["src"] for _, x in sel)
-    rows = sorted(((s, x) for s, x in sel if not src or x["src"] == src), key=lambda r: -r[1]["cost"])
-    chips = chip(tr("chip.all"), not src and not cron, link("/sessions", p=p, proj=proj, q=term)) + "".join(
-        chip(f"{e(origin_label(k))}<span>{n}</span>", k == src or k == "cron" and cron,
-             link("/sessions", p=p, view="cron") if k == "cron" else link("/sessions", p=p, src=k, proj=proj, q=term))
-        for k, n in counts.most_common())   # the cron chip opens the per-job table, its rows lead to the runs
-    hidden = "".join(f'<input type="hidden" name="{k}" value="{e(v)}">' for k, v in (("p", p), ("src", src), ("proj", proj)) if v)
+           and (not term or term.lower() in (x["title"] or "").lower()) and (not chat or (x.get("chat") or NOCHAT)["key"] == chat)]
+    counts = Counter(bot_key(x) for _, x in sel)
+    rows = sorted(((s, x) for s, x in sel if (not src or x["src"] == src) and (not bot or bot_key(x) == bot)), key=lambda r: -r[1]["cost"])
+    chips = chip(tr("chip.all"), not src and not bot and not cron, link("/sessions", p=p, chat=chat, proj=proj, q=term)) + "".join(
+        chip(f"{e(bot_label(k))}<span>{n}</span>", (k == bot) if not cron else k.endswith(":cron") and bot in ("", k),
+             link("/sessions", p=p, view="cron", bot=k) if k.endswith(":cron") else link("/sessions", p=p, bot=k, chat=chat, proj=proj, q=term))
+        for k, n in counts.most_common())   # a cron chip opens the per-job table, its rows lead to the runs; old src= links still filter
+    hidden = "".join(f'<input type="hidden" name="{k}" value="{e(v)}">' for k, v in (("p", p), ("src", src), ("bot", bot), ("chat", chat), ("proj", proj)) if v)
     search = (f'<form class="search" action="/sessions" role="search">{hidden}<input type="search" name="q" value="{e(term)}" '
               f'placeholder="{tr("ses.search")}" aria-label="{tr("ses.search")}"></form>')
-    flt = f'<div class="filters"><nav class="chips" aria-label="{tr("aria.origin")}">{chips}</nav>{search}</div>'
+    flt = f'<div class="filters"><nav class="chips" aria-label="{tr("aria.bot")}">{chips}</nav>{search}</div>'
     if cron:
-        return layout(tr("ses.cron") + " · Usagecast", "/sessions", p, tr("nav.sessions"), sub, flt + cron_jobs(d, p), keep={"view": "cron"})
+        mine = dict(d, sess={s: x for s, x in d["sess"].items() if bot_key(x) == bot}) if bot else d
+        return layout(tr("ses.cron") + " · Usagecast", "/sessions", p, tr("nav.sessions"), sub, flt + cron_jobs(mine, p), keep={"view": "cron", "bot": bot})
     if proj:
-        clear = f'<a href="{link("/sessions", p=p, src=src, q=term)}">{tr("ses.clear")}</a>'
+        clear = f'<a href="{link("/sessions", p=p, src=src, bot=bot, chat=chat, q=term)}">{tr("ses.clear")}</a>'
         flt += f'<p class="hint">{tr("ses.only_project", name=e(proj_label(proj)), clear=clear)}</p>'
+    if chat:
+        ch = next((x["chat"] for _, x in sel if x.get("chat")), None)
+        clear = f'<a href="{link("/sessions", p=p, src=src, bot=bot, proj=proj, q=term)}">{tr("ses.clear")}</a>'
+        flt += f'<p class="hint">{tr("ses.only_chat", name=e(chat_label(ch)[0] if ch else chat), clear=clear)}</p>'
     s_cost = sum(x["cost"] for _, x in rows)
     kids = defaultdict(lambda: [0, 0.0])   # session -> [subagents it started, their $ in the period]
     for x in d["sess"].values():
@@ -2608,13 +2728,13 @@ def page_sessions(p, q):
             return " · " + tr("ses.by", parent=f'<a href="{link("/s/" + quote(x["parent"]), p=p)}">{e(t[:50])}</a>')
         return " · " + tr("ses.subs", n=cnt(kids[s][0]), cost=money(kids[s][1])) if s in kids else ""
     trs = [(f'<a href="/s/{quote(s)}?p={p}">{e((x["title"] or tr("untitled"))[:80])}</a>'
-             f'<span class="why">{who(x)}{e(origin_label(x["origin"]))} · {when(x["last"], "daytime")}{rel(s, x)}</span>',
+             f'<span class="why">{e(bot_chat(x))} · {when(x["last"], "daytime")}{rel(s, x)}</span>',
             e(proj_label(x["project"] or NO_PROJ)) if x["project"] else "–", cnt(x["calls"]), money(x["cost"]), pct(x["cost"], tot),
             f'<span class="why">{e(label(x["top"], d["ttl"])[0])}</span>') for s, x in rows[:200]]
     body = f"""{flt}
 <p class="hint">{tr("ses.count", n=cnt(len(rows)), cost=money(s_cost), p=pct(s_cost, tot))}</p>
 {table(["th.session", "th.project", "th.steps", "th.cost", "th.share", "th.top"], trs, ("", "l o", "", "", "o", "l o"), "titles")}"""
-    return layout(tr("nav.sessions") + " · Usagecast", "/sessions", p, tr("nav.sessions"), sub, body, keep={"src": src, "proj": proj, "q": term})
+    return layout(tr("nav.sessions") + " · Usagecast", "/sessions", p, tr("nav.sessions"), sub, body, keep={"src": src, "bot": bot, "chat": chat, "proj": proj, "q": term})
 
 
 def page_projects(p):
@@ -2664,6 +2784,8 @@ def page_session(sid, p):
         return None
     pre = f"-p {e(a)} " if a else ""
     x = d["sess"][sid]
+    x["agent"] = a
+    ch = x.get("chat") or NOCHAT
     subs = sum(k[3] for k in kids)
     if subs:
         d["comp"]["sub"] = subs   # the subagents it started count as one more part of this session
@@ -2676,7 +2798,8 @@ def page_session(sid, p):
               f'{money(r)} <span class="why">{tr("ses.after_pause") if kind == "rebuild" else tr("ses.no_pause") + " · " + tr("brk." + kind[6:])}</span>'
               if kind else "",
               f'<span class="why">{brk(names(keys))}</span>') for t, ctx, cost, r, kind, keys in d["steps"]]
-    sub = " · ".join([f'<a href="{link("/sessions", p=p)}">{tr("ses.back")}</a>', *([e(agent_label(a))] if len(homes()) > 1 else []), e(origin_label(x["origin"])),
+    sub = " · ".join([f'<a href="{link("/sessions", p=p)}">{tr("ses.back")}</a>', e(bot_label(bot_key(x))),
+                      f'<a href="{link("/sessions", p=p, bot=bot_key(x), chat=ch["key"])}">{e(chat_label(ch)[0])}</a>',
                       *([tr("ses.by", parent=f'<a href="{link("/s/" + quote(pid), p=p)}">{e((ptitle or tr("untitled"))[:60])}</a>')] if pid else []),
                       tr("ses.project", name=e(proj_label(x["project"] or NO_PROJ))),
                       tr("ses.started", at=when(x["started"] or 0, "datetime")), tr("ses.steps", n=cnt(x["calls"])), money(x["cost"]),
@@ -3043,6 +3166,15 @@ def demo_db(now):
                        (sid, len(calls), 5 * len(calls), round(read), round(write), rnd.randint(150, 600) * len(calls), rows[-1][6]))
             db.executemany("""insert into messages(session_id, role, content, tool_name, tool_calls, tool_call_id, timestamp,
                 reasoning) values(?, ?, ?, ?, ?, ?, ?, ?)""", rows)
+    for col in ("chat_id", "chat_type", "thread_id", "display_name", "origin_json"):
+        db.execute(f"alter table sessions add column {col}")
+    dm = {"platform": "telegram", "chat_id": "100", "chat_name": "Alex", "chat_type": "dm"}
+    places = [*({**dm, "thread_id": t, **({"chat_topic": n} if n else {})} for t, n in (("11", "Shop"), ("12", "Blog"), ("13", None))), dm,
+              {"platform": "discord", "chat_id": "300", "chat_name": "Studio / #releases / v2 launch", "chat_type": "thread", "thread_id": "300"},
+              {"platform": "discord", "chat_id": "400", "chat_name": "alex", "chat_type": "dm"}]
+    for (sid,) in db.execute("select id from sessions where source = 'telegram'").fetchall():
+        o = rnd.choices(places, (5, 3, 2, 3, 2, 1))[0]
+        db.execute("update sessions set source = ?, origin_json = ? where id = ?", (o["platform"], json.dumps(o), sid))
     db.commit()
     return db
 
@@ -3078,6 +3210,7 @@ def demo():
     (DATA / "ingest" / "macbook.json").write_text(json.dumps({"host": "macbook", "at": round(now - 300), "hours": [
         [h, 0.8 + 0.1 * (h // 3600 % 5)] for h in range(int(now - 7 * 86400) // 3600 * 3600, int(now), 3600)
         if datetime.fromtimestamp(h).hour in (19, 20, 21)]}))
+    (DATA / "bots.json").write_text(json.dumps({"at": round(now), "names": {"": {"telegram": "Atlas", "discord": "Atlas"}}}))
     SET.clear(); SET.update(DEFAULTS, push="off", ntfy_topic="", url="", guard=True, guard_jobs=["d2"], ingest_token="demo"); FX.clear()
     print(f"usagecast demo on http://127.0.0.1:{PORT} (data in {tmp})", flush=True)
     ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
@@ -3121,8 +3254,45 @@ def selftest_v4():
         assert "live." not in live_card(dict(runs=[], n=0, up=False, down=[], next=[(t0, "x")], at=t0), "w")
 
 
+def selftest_chats():
+    """Bots & chats: chat names from origin_json with every fallback, subagents in their starter's chat, grouping per bot."""
+    _req.lang = "en"
+    db = sqlite3.connect(":memory:")
+    db.execute("create table sessions(id, source, title, started_at, parent_session_id, chat_id, chat_type, thread_id, display_name, origin_json)")
+    tg = lambda th, topic=None: json.dumps({"platform": "telegram", "chat_id": "42", "chat_name": "Sam", "chat_type": "dm", "thread_id": th,
+                                            **({"chat_topic": topic} if topic else {})})
+    db.executemany("insert into sessions values (?,?,?,?,?,?,?,?,?,?)", [
+        ("a", "telegram", "A", 1, None, "42", "dm", "7", "Sam", tg("7", "Shop")),
+        ("b", "telegram", "B", 2, None, "42", "dm", "7", "Sam", tg("7")),   # same topic, name not stored with this one
+        ("c", "telegram", "C", 3, None, "42", "dm", "9", "Sam", tg("9")),   # a topic nobody named
+        ("d", "discord", "D", 4, None, "55", "thread", "55", "Sam", json.dumps({"platform": "discord", "chat_id": "55", "chat_type": "thread",
+         "chat_name": "Guild / #dev / release", "chat_topic": "what the channel is about", "thread_id": "55"})),
+        ("e", "cron", "Daily report · Oct 08 16:31", 5, None, None, "dm", None, None, json.dumps({"platform": "local", "chat_type": "dm"})),
+        ("f", "telegram", "F", 6, None, "42", "dm", None, "Sam", None),   # old row without origin_json
+        ("g", "subagent", "G", 7, "b", None, None, None, None, None),
+        ("h", "subagent", "H", 8, "g", None, None, None, None, None),     # a subagent's subagent
+        ("i", "slack", "I", 9, None, "C1", "group", "171.2", None, json.dumps({"platform": "slack", "chat_id": "C1", "chat_type": "group",
+         "chat_name": "#ops", "thread_id": "171.2"})),
+        ("j", "subagent", "J", 10, "gone", None, None, None, None, None)])
+    ci = chat_index(db)
+    lab = lambda k: chat_label(ci[k][1])
+    assert [lab(k) for k in "abcdfi"] == [("Shop", "Sam"), ("Shop", "Sam"), ("Topic 9", "Sam"), ("release", "Guild / #dev"), ("Sam", ""),
+                                          ("#ops", "Thread")], ci
+    assert ci["a"][1]["key"] == ci["b"][1]["key"] == "telegram:42:7" and ci["d"][0] == "discord" and ci["f"][1]["key"] == "telegram:42:"
+    assert ci["e"] == ("cron", {**NOCHAT, "key": "cron:Daily report", "name": "Daily report", "kind": "cron"})
+    assert ci["g"] == ci["h"] == ("subagent", ci["b"][1]) and ci["j"] == ("subagent", NOCHAT) and lab("j") == ("No chat recorded", "")
+    old_db = test_db()[0]   # an older Hermes without the chat columns
+    assert chat_index(old_db)["s"] == ("telegram", {**NOCHAT, "key": "telegram::"}) and chat_index(old_db)["c"][1]["name"] == "Daily report"
+    sess = {k: dict(agent="w" if k in "gh" else "", src="x", platform=ci[k][0], chat=ci[k][1], cost=float(n)) for n, k in enumerate("abcdegh", 1)}
+    g = by_bot(sess)
+    assert set(g) == {":telegram", ":discord", ":cron", "w:subagent"} and g[":telegram"][0] == 6.0 and g["w:subagent"][0] == 13.0
+    assert {k: (v[0], v[2]) for k, v in g[":telegram"][1].items()} == {"telegram:42:7": (3.0, 2), "telegram:42:9": (3.0, 1)}
+    assert list(g["w:subagent"][1]) == ["telegram:42:7"] and bot_key({"src": "cli"}) == ":cli"
+
+
 def selftest():
     selftest_v4()
+    selftest_chats()
     global HERMES, DATA, CLAUDE
     SET.clear(); SET.update(DEFAULTS); FX.clear(); FC.clear()   # the installed settings must not change the expected formats
     # Locales: same keys and placeholders everywhere, every literal key used in the code exists
@@ -3290,6 +3460,10 @@ def selftest():
         db.backup(disk := sqlite3.connect(Path(tmp) / "state.db"))
         disk.execute("insert into sessions values ('k', 'subagent', 'Subagent: check', null, ?, null, 's')", (time.time() - 1800,))
         disk.execute("insert into session_model_usage values ('k', 'claude-opus-5-5', '', 2, 10, 4000, 1000, 200, ?)", (time.time() - 1700,))
+        for col in ("chat_id", "chat_type", "thread_id", "display_name", "origin_json"):
+            disk.execute(f"alter table sessions add column {col}")
+        disk.execute("update sessions set origin_json = ? where id = 's'", (json.dumps(
+            {"platform": "telegram", "chat_id": "42", "chat_name": "Sam", "chat_type": "dm", "thread_id": "7", "chat_topic": "Shop"}),))
         disk.commit()
         disk.close()
         STATE["at"] = time.time()  # no limit fetch during the test
@@ -3414,7 +3588,11 @@ def selftest():
         assert week_tight() and shared_tips(both)[1][0] == 3.0   # a tight week keeps everyone at 100k
         STATE["limits"] = lim
         LONG.clear()
-        leftover = re.compile(r"\b(?:th|set|cal|ovl|ev|brk|ov|lim|det|ses|hist|heat|nav|kpi|seg|src|proj|cron|period|since|fmt|num|tip|comp|label|alert|until|sub)\.[a-z_]")
+        refresh_bots()   # no tokens in this home: nothing fetched, nothing named
+        assert read_json(DATA / "bots.json")["names"] == {} and bot_label(":telegram") == "Hermes · Telegram"
+        (DATA / "bots.json").write_text(json.dumps({"at": time.time(), "names": {"": {"telegram": "Robo"}}}))
+        assert (bot_label(":telegram"), bot_label(":cron"), bot_label("w:discord")) == ("Robo · Telegram", "Robo · Cron jobs", "w · Discord")
+        leftover = re.compile(r"\b(?:chat|th|set|cal|ovl|ev|brk|ov|lim|det|ses|hist|heat|nav|kpi|seg|src|proj|cron|period|since|fmt|num|tip|comp|label|alert|until|sub)\.[a-z_]")
         for code in LOC:
             _req.lang, _req.url = code, "/?p=7"
             SET["ntfy_topic"] = "usagecast-test" if code != "en" else ""   # English: not set up yet, the others: subscribe steps
@@ -3431,6 +3609,17 @@ def selftest():
         assert "Subagent: check" in ps and 'href="/s/k?p=7"' in ps and kc in ps and "with subagents" in ps and "Subagents (delegate_<wbr>task)" in ps, ps
         assert 'started by <a href="/s/s?p=7">Test</a>' in pk and "with subagents" not in pk, pk
         assert f"subagents: 1 · {kc}" in pl and 'started by <a href="/s/s?p=7">' in pl, pl
+        # Bots & chats: the overview folds the chats out per bot, the list filters by bot and chat, old src= links still work
+        po, shop = page_overview("7"), link("/sessions", p="7", bot=":telegram", chat="telegram:42:7")
+        assert 'class="chats"' in po and f'<a href="{shop}"><span>Shop</span>' in po and ">Robo · Subagents<" in po, po   # one DM: no context
+        assert ">Robo · Cron jobs<" in po and link("/sessions", p="7", bot=":cron", chat="cron:Daily report") in po
+        pf = page_sessions("7", {"bot": [":telegram"], "chat": ["telegram:42:7"]})
+        assert "Only chat <b>Shop</b>" in pf and ">Test</a>" in pf and "Robo · Telegram · Shop" in pf and ">Subagent: check</a>" not in pf, pf
+        pc_ = page_sessions("7", {"chat": ["telegram:42:7"]})
+        assert ">Test</a>" in pc_ and ">Subagent: check</a>" in pc_ and "Daily report" not in pc_   # the subagents of that chat too
+        ps_ = page_sessions("7", {"src": ["cron"]})
+        assert "Daily report" in ps_ and ">Test</a>" not in ps_ and "Daily report" in page_sessions("7", {"view": ["cron"], "bot": [":cron"]})
+        assert "Robo · Telegram" in ps and ">Shop</a>" in ps
     assert "&lt;x&gt;" in page_settings({"done": ["test"]}) and 'data-theme="dark"' in page_settings({})
     # Extra credits: a drop in the counter starts a new month, steps come once per month and only the highest
     assert extra_months([{"t": i, "extra": v} for i, v in enumerate([None, 1.0, 2.5, 2.5, 0.0, 0.5, 3.0])]) == [[1, 2.5], [4, 3.0]]
@@ -3490,7 +3679,9 @@ def selftest():
     tu = analyze(db, -1, snap, 300, logs={})["sess"]["s"]["turns"]
     assert [(a, b, n) for a, b, n, _ in tu] == [(0.0, 2.0, 2), (1000.0, 1000.0, 1)], tu
     assert VERSION == re.search(r"^## (\S+)", (ROOT / "CHANGELOG.md").read_text(), re.M)[1], "VERSION and CHANGELOG.md disagree"
-    assert demo_db(time.time()).execute("select count(*) from sessions where source = 'cron'").fetchone()[0] > 10   # --demo data builds
+    dm_ = demo_db(time.time())
+    assert dm_.execute("select count(*) from sessions where source = 'cron'").fetchone()[0] > 10   # --demo data builds
+    assert {p for p, _ in chat_index(dm_).values()} == {"telegram", "discord", "cli", "cron"}   # with topics and two bots
     print("selftest ok")
 
 
