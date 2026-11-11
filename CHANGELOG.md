@@ -2,6 +2,15 @@
 
 Versions follow [Semantic Versioning](https://semver.org).
 
+## 3.5.1 - 2026-11-11
+
+- Tips: "Turn off unused tools" now counts every tool the agent ran in the last 30 days, whatever the period shown.
+  On a 24 h view it used to suggest turning off tools that are used every week (clarify, memory, browser).
+- Faster pages: the limit history file is parsed once and then only its new lines are read; the overview used to
+  parse the whole file up to four times per load, and the file keeps growing.
+- Settings on phones: the source picker no longer sticks out on the right (the page could shift sideways), and no
+  id is used twice on the page (the budget guard and source cards had the same id as their controls).
+
 ## 3.5.0 - 2026-11-09
 
 - Bots & chats: one overview card replaces "Where it happens" and "By agent". One row per bot (an agent on one

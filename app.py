@@ -988,7 +988,13 @@ def shared_tips(d):
     return out
 
 
-def tips(d, snap, shared=True):
+def tools_used(x):
+    """Tool names an analysis ran; any loaded skill counts as skill_view."""
+    u = x["uses"]
+    return {k.split(":", 1)[1] for k in u if k.startswith("tool:")} | ({"skill_view"} if any(k.startswith("skill:") for k in u) else set())
+
+
+def tips(d, snap, shared=True, also=frozenset()):
     """[(rough saving in $, title, html text)], biggest saving first; the overview shows the saving as % of the period."""
     tot, out = d["total"] or 1, shared_tips(d) if shared else []
     p = lambda v: pct(v, tot)
@@ -998,7 +1004,7 @@ def tips(d, snap, shared=True):
         out.append((save, tr(key), tr(key + ".text", p=p(save))
                     + fix("config", "set", "prompt_caching.cache_ttl", "1h" if key == "tip.ttl1h" else "5m")))
     tools = snap.get("tools", {})
-    used = {k.split(":", 1)[1] for k in d["uses"] if k.startswith("tool:")} | ({"skill_view"} if any(k.startswith("skill:") for k in d["uses"]) else set())
+    used = tools_used(d) | also   # also = what ran in the last 30 days: a quiet day is no reason to turn a tool off
     st = sum(tools.values()) or 1
     unused = sorted(((n, d["comp"].get("schema", 0) * t / st) for n, t in tools.items() if n not in used), key=lambda x: -x[1])
     s = sum(v for _, v in unused)
@@ -1036,10 +1042,11 @@ def all_tips(d):
     Shared tips run once on the whole; the same own tip of several agents becomes one card with a line per agent.
     ponytail: an own tip's share text is of its own agent's cost, the "saves" figure is of the whole."""
     many, own = len(d["parts"]) > 1, {}
+    month = {a: tools_used(x) for a, _, x in data_for("30")["parts"]}
     out = shared_tips(d) if many else []
     for a, h, x in d["parts"]:
         with at_home(h):
-            for sv, t, txt in tips(x, load_snap(), shared=not many):
+            for sv, t, txt in tips(x, load_snap(), shared=not many, also=month.get(a, set())):
                 own.setdefault(t, []).append((sv, a, txt))
     for t, g in own.items():
         txt = "<br>".join(f"<strong>{html.escape(agent_label(a))}:</strong> {x}" for _, a, x in g) if many else g[0][2]
@@ -1047,11 +1054,31 @@ def all_tips(d):
     return sorted(out, key=lambda x: -x[0])
 
 
+_LH, _LH_LOCK = {"key": None, "off": 0, "rows": []}, threading.Lock()
+
+
 def limit_history(days=7):
-    cut = time.time() - days * 86400
+    """Rows of data/limits.jsonl newer than `days`. The file only grows, so it is parsed once and later calls read just
+    the lines appended since (a page used to parse all of it up to four times). A shorter file or another first line
+    means it was rewritten: start over."""
+    cut, f = time.time() - days * 86400, DATA / "limits.jsonl"
     try:
-        return [h for h in map(json.loads, (DATA / "limits.jsonl").read_text().splitlines()) if h["t"] > cut]
-    except (OSError, ValueError):
+        with _LH_LOCK, open(f, "rb") as fh:
+            st, head = os.fstat(fh.fileno()), fh.read(64)
+            key = (str(f), st.st_ino, head)
+            if key != _LH["key"] or st.st_size < _LH["off"]:
+                _LH.update(key=key, off=0, rows=[])
+            fh.seek(_LH["off"])
+            new = fh.read()
+            end = new.rfind(b"\n") + 1   # a half-written last line waits for the next call
+            for line in new[:end].splitlines():
+                try:
+                    _LH["rows"].append(json.loads(line))
+                except ValueError:
+                    pass
+            _LH["off"] += end
+            return [h for h in _LH["rows"] if h["t"] > cut]
+    except OSError:
         return []
 
 
@@ -2977,8 +3004,8 @@ def page_settings(q):
            + f'<p><button type="button" class="btn" id="tg-home" hidden>{T("tg.home")}</button></p>')   # static/app.js shows it in Telegram
     body = (f'{top}<form method="post" action="/settings" class="set">'
             '<button class="sr" name="action" value="save" tabindex="-1" aria-hidden="true"></button>'  # Enter in a field = save
-            + card("look", T("look"), look) + card("limits", T("limits"), limits) + card("alerts", T("alerts"), alerts_, T("alerts.hint")) + card("guard", T("guard"), guard_, T("guard.hint")) + card("machines", T("ing"), machines, T("ing.hint"))
-            + card("push", T("push"), push, T("push.hint")) + card("tg", T("tg"), tgc, T("tg.hint")) + card("source", T("src"), source)
+            + card("look", T("look"), look) + card("limits", T("limits"), limits) + card("alerts", T("alerts"), alerts_, T("alerts.hint")) + card("budget", T("guard"), guard_, T("guard.hint")) + card("machines", T("ing"), machines, T("ing.hint"))
+            + card("push", T("push"), push, T("push.hint")) + card("tg", T("tg"), tgc, T("tg.hint")) + card("src", T("src"), source)
             + f'<div class="save"><button class="btn primary" name="action" value="save">{T("save")}</button></div></form>')
     return layout(T("h1") + " · Usagecast", "/settings", s["period"], T("h1"), T("sub"), body, tabs=False)
 
@@ -3491,6 +3518,12 @@ def selftest():
         DATA.mkdir(parents=True, exist_ok=True)
         (DATA / "limits.jsonl").write_text("".join(json.dumps({"t": nw - 3 * 86400 + i * 3600, "seven_day": 50 + i}) + "\n" for i in range(3)))
         c = limits_card(None)
+        assert len(limit_history()) == 3
+        with open(DATA / "limits.jsonl", "a") as f:
+            f.write(json.dumps({"t": nw, "seven_day": 61}) + "\n" + '{"t": ')   # half a line: not read yet
+        assert [h["seven_day"] for h in limit_history()][-1] == 61 and len(limit_history()) == 4
+        (DATA / "limits.jsonl").write_text(json.dumps({"t": nw, "seven_day": 1}) + "\n")
+        assert [h["seven_day"] for h in limit_history()] == [1]   # rewritten: start over
         (DATA / "limits.jsonl").unlink()
         assert c.count('class="fcl"') == 1 and c.count('class="cap"') == 1 and "Reset " in c, c   # trend: this week, 100 % line, forecast
         assert "runs ~20% over, about $" in c and "Extra credits this month" in c, c
@@ -3574,6 +3607,11 @@ def selftest():
         x1 = dict(total=1.0, ttl_save=0, comp={}, uses={}, ctx={}, where={"cron:Daily report": 0.5})
         at = all_tips(dict(x1, parts=[("", None, x1), ("a", None, dict(x1))]))
         assert len(at) == 1 and at[0][0] == 0.5 and at[0][2].count("<strong>") == 2, at   # one card for both agents
+        xt = dict(total=1.0, ttl_save=0, comp={"schema": 0.5}, uses={"tool:a": 1}, ctx={}, where={})
+        assert [t for _, t, _ in tips(xt, {"tools": {"a": 1, "b": 1}})] == [tr("tip.unused")]
+        assert not tips(xt, {"tools": {"a": 1, "b": 1}}, also={"b"}), "b ran this month: not unused"
+        ids = re.findall(r'\bid="([^"]+)"', page_settings({}))
+        assert len(ids) == len(set(ids)), sorted(i for i in ids if ids.count(i) > 1)
         assert long_line([50_000] * 9) == LONG_CTX and long_line([50_000] * 20) == LONG_CTX   # too few tasks / small tasks
         assert long_line(list(range(10_000, 160_001, 10_000))) == 130_000 and long_line([900_000] * 12) == 2 * LONG_CTX
         _req.lang = "en"
