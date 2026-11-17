@@ -309,6 +309,9 @@ pre.cmd{margin:0 0 14px;padding:11px 14px;border-radius:10px;background:var(--ti
 .set input:not([type=checkbox]):not([type=radio]):hover,.set select:hover{box-shadow:0 0 0 1px var(--soft)}
 .set input:focus-visible,.set select:focus-visible{outline:2px solid var(--acc-ink);outline-offset:1px}
 .set input[type=number]{width:5.5em}
+.set input[type=time]{box-sizing:border-box;width:7.2em;padding-inline:8px}
+.set input[type=time]::-webkit-calendar-picker-indicator{display:none}   /* phones open their own picker; the icon cost the AM/PM room */
+.set .range{display:inline-flex;align-items:center;gap:4px;white-space:nowrap}   /* from - to wraps as one unit */
 .set input.wide{width:min(340px,100%)}
 .set input.mono{font-family:var(--mono);font-size:13px;width:min(260px,100%)}
 .set input[type=radio]{accent-color:var(--acc);width:18px;height:18px;margin:0}

@@ -2,6 +2,20 @@
 
 Versions follow [Semantic Versioning](https://semver.org).
 
+## 3.8.0 - 2026-11-17
+
+- Mascots: a small animated companion sits in the limits card (terminal, rubber duck, server rack, coffee or bot). It
+  shows four moods from the account in use: calm, an agent is working, tight (a window at 85 % or a tight week forecast)
+  and at the limit. Coffee level and bot battery follow what is left of the week. It switches between calm and working
+  without a reload, follows light and dark mode, and stops moving with reduced motion. Pick one or turn it off in
+  Settings > Appearance.
+- Settings rebuilt like iOS Settings: a short list (Appearance, Alerts, Notifications, Budget guard, Advanced) that shows
+  the current state of each, one sub-page per section. Every change saves at once with a short "Saved" note; an invalid
+  value is pointed out at its field and keeps the old one. Without JavaScript the save button stays.
+- Each sub-page only saves its own settings, so switches on other pages are never turned off by a save.
+- Push and Telegram share one Notifications page; the channel is a checkmark list that fits a phone screen.
+  Explanations are one line each; technical details moved to Advanced and the README.
+
 ## 3.7.0 - 2026-11-17
 
 - Models: every session and subagent now names the model it runs on ("Opus 5.5", "Haiku 4.5"), in Right now, in the

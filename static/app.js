@@ -9,7 +9,7 @@ function syncPet() {
   const card = document.getElementById("live")
   if (!card) return
   const st = +card.dataset.n > 0 ? "work" : "calm"
-  document.querySelectorAll(".pet").forEach(p => { if (p.dataset.st === "calm" || p.dataset.st === "work") p.dataset.st = st })
+  document.querySelectorAll(".pet").forEach(p => { if (p.dataset.st === "calm" || p.dataset.st === "work") { p.dataset.st = st; p.setAttribute("aria-label", p.dataset["l" + st]) } })
 }
 syncPet()
 

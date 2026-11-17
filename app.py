@@ -2166,7 +2166,8 @@ def pet_html(running, now):
     st = pet_state(STATE["limits"], all(a["avail"] for a in STATE["accts"] if a["primary"]), running, now)
     wk = next((u for k, u, *_ in windows(STATE["limits"], now) if k == "seven_day"), 0)
     svg = "".join(pet(SET["pet"], x, wk) for x in (("calm", "work") if st in ("calm", "work") else (st,)))
-    return f'<span class="pet" data-st="{st}" role="img" aria-label="{tr("pet." + st)}">{svg}</span>'
+    alt = "".join(f' data-l{x}="{tr("pet." + x)}"' for x in ("calm", "work")) if st in ("calm", "work") else ""   # app.js swaps the label
+    return f'<span class="pet" data-st="{st}"{alt} role="img" aria-label="{tr("pet." + st)}">{svg}</span>'
 
 
 def acct_block(a, now, lv):
@@ -3186,8 +3187,8 @@ def set_alerts(s, done):
     lo, hi = RANGES["five_min"]
     five = (f'{check("alert_five")}<input type="number" id="five_min" name="five_min" value="{s["five_min"]}" min="{lo}" max="{hi}"'
             f' inputmode="numeric" aria-label="{T("a.five.min")}"><span class="why">{T("min")}</span>')
-    quiet = (f'{check("quiet")}<input type="time" id="quiet_from" name="quiet_from" value="{s["quiet_from"]}" aria-label="{T("quiet.from")}">'
-             f'<span class="why">–</span><input type="time" id="quiet_to" name="quiet_to" value="{s["quiet_to"]}" aria-label="{T("quiet.to")}">')
+    quiet = (f'{check("quiet")}<span class="range"><input type="time" id="quiet_from" name="quiet_from" value="{s["quiet_from"]}" aria-label="{T("quiet.from")}">'
+             f'<span class="why">–</span><input type="time" id="quiet_to" name="quiet_to" value="{s["quiet_to"]}" aria-label="{T("quiet.to")}"></span>')
     share = lambda k: (f'<input type="number" id="{k}" name="{k}" value="{s[k]}" min="{RANGES[k][0]}" max="{RANGES[k][1]}" step="0.1"'
                        f' inputmode="decimal" aria-label="{T(k)}"><span class="why">{T("pct")}</span>')
     nok = "" if RATE.get("k") else " " + T("a.nok")
@@ -3943,7 +3944,7 @@ def selftest():
         assert pet_state(W(100, 20), True, 1, nw) == pet_state(W(10, 100), True, 0, nw) == pet_state(W(10, 20), False, 1, nw) == "limit"
         STATE["limits"] = W(10, 20)
         c = limits_card(None)
-        assert c.count('<span class="pet" data-st="calm" role="img" aria-label="Mascot: calm') == 1 and 'class="pet-calm"' in c and 'class="pet-work"' in c, c
+        assert c.count('<span class="pet" data-st="calm" data-lcalm="Mascot: calm') == 1 and 'data-lwork="Mascot: an agent' in c and 'role="img" aria-label="Mascot: calm' in c and 'class="pet-calm"' in c and 'class="pet-work"' in c, c
         assert 'data-st="work"' in limits_card(None, running=1)
         STATE["accts"] = [A("w1", "work", STATE["limits"], use=True, primary=True, avail=False), A("p2", "personal", W(1, 1), next=True)]
         assert 'data-st="limit"' in limits_card(None, running=1) and 'class="pet-work"' not in limits_card(None)   # the account in use is benched
