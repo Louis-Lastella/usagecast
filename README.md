@@ -53,6 +53,9 @@ when every account is tight. With one account everything looks as before.
 plus the subagents they started. It refreshes every 5 seconds while the page is open and warns when the Hermes gateway
 is down.
 
+**Several accounts:** the limits card opens with all accounts pooled into one (mean use, next reset); "2 accounts"
+folds out each account on its own, and the device remembers whether it was open.
+
 **Mascot:** Beside the big weekly number sits an animated companion: terminal, debug duck, server rack, coffee or bot. It
 follows the 5-hour window (the week if your plan has none) and shows four moods by how full that window is: calm, busy from 50 %,
 tight from 85 % (or a tight forecast) and asleep at the limit. Coffee level and bot battery show what is left. It follows light and dark

@@ -2097,11 +2097,11 @@ def api_summary():
 TIGHT = 85   # forecast % from which the verdict says "Tight": the backtest was 16-47 % off, so 99 % is no "On track"
 
 
-def win_txt(key, u, frac, reset, length, hist, now, lv):
-    """Verdict line under one limit window's meter and whether the meter is hot."""
+def win_txt(key, u, frac, reset, length, hist, now, lv, fc=None):
+    """Verdict line under one limit window's meter and whether the meter is hot. fc: a week forecast worked out elsewhere."""
     start = reset - length if reset else now
     if key == "seven_day":
-        fc = week_forecast(u, frac)
+        fc = week_forecast(u, frac) if fc is None else fc
         if u >= 100:
             txt = tr("lim.full", reset=until(reset))
         elif fc is None:
@@ -2147,30 +2147,85 @@ def acct_head(a, now):
     return f'<div class="acct"><span class="who">{e(a["label"] or a["id"])}</span>{tag}</div>'
 
 
-def pet_window(L, now):
-    """The window the mascot follows: the 5-hour one on plans that have it (it is what throttles first), else the week."""
-    ws = {k: w for k, *w in windows(L, now)}
+def pet_window(ws):
+    """The window the mascot follows (ws as from windows()): the 5-hour one on plans that have it (it is what throttles
+    first), else the week."""
+    ws = {k: w for k, *w in ws}
     return next(((k, *ws[k]) for k in ("five_hour", "seven_day") if k in ws), None)
 
 
-def pet_state(L, avail, now):
+def pet_state(ws, avail):
     """Mascot mood, from the window it follows only: limit (a window full or the account not available, both block
     work) > tight (>= 85 %, or the week forecast >= TIGHT when it follows the week) > work (>= 50 %) > calm."""
-    if not avail or any(u >= 100 for _, u, *_ in windows(L, now)):
+    if not avail or any(u >= 100 for _, u, *_ in ws):
         return "limit"
-    k, u, f, *_ = pet_window(L, now) or (None, 0, None)
+    k, u, f, *_ = pet_window(ws) or (None, 0, None)
     if u >= 85 or k == "seven_day" and (week_forecast(u, f) or 0) >= TIGHT:
         return "tight"
     return "work" if u >= 50 else "calm"
 
 
-def pet_html(now):
-    """The mascot for the account in use (the primary one)."""
-    if SET["pet"] not in PETS or not STATE["limits"]:
+def pet_html(ws, avail):
+    """The mascot for a set of windows: the primary account's, or all accounts pooled."""
+    if SET["pet"] not in PETS or not ws:
         return ""
-    st = pet_state(STATE["limits"], all(a["avail"] for a in STATE["accts"] if a["primary"]), now)
-    used = (pet_window(STATE["limits"], now) or (None, 0))[1]
+    st = pet_state(ws, avail)
+    used = (pet_window(ws) or (None, 0))[1]
     return f'<span class="pet" data-st="{st}" role="img" aria-label="{tr("pet." + st)}">{pet(SET["pet"], st, used)}</span>'
+
+
+def big_row(u, lv, pet):
+    return (f'<div class="lbl">{tr("lim.week")}</div><div class="bigrow"><div class="big">{nf(100 - u if lv else u)}'
+            f'<span>{tr("lim.unit.left" if lv else "lim.unit")}</span></div>{pet}</div>')
+
+
+def lim_row(key, u, frac, hot, lv, txt, bud=""):
+    return (f'<div class="lim"><div class="row"><span>{tr("lim.week" if key == "seven_day" else "win." + key)}</span>'
+            f'<b>{tr("lim.left", p=pc(100 - u)) if lv else pc(u)}</b></div>{meter(u, frac, hot, lv)}<div class="why">{txt}</div>{bud}</div>')
+
+
+def pooled(accts, now):
+    """All accounts as one, as a windows() list: per window the mean use (100 % = all full), the mean elapsed share and
+    the next reset. Only windows every account has."""
+    ws = [windows(a["limits"], now) for a in accts]
+    out = []
+    for key, length in WINDOWS[:2]:
+        xs = [w for x in ws for w in x if w[0] == key]
+        if len(xs) < len(accts):
+            continue
+        fr, rs = [w[2] for w in xs if w[2] is not None], [w[3] for w in xs if w[3]]
+        # ponytail: the mean elapsed share is the pooled clock; with resets days apart the forecast is a rough blend
+        out.append((key, sum(w[1] for w in xs) / len(xs), sum(fr) / len(fr) if fr else None, min(rs) if rs else None, length))
+    return out
+
+
+def pool_history(accts):
+    """Limits log rows averaged over the accounts, only where every account was read at the same time."""
+    by = {}
+    for a in accts:
+        for h in limit_history(acct=a["id"]):
+            by.setdefault(h["t"], []).append(h)
+    return [{"t": t, **{k: sum(h.get(k) or 0 for h in hs) / len(hs) for k in ("five_hour", "seven_day")}}
+            for t, hs in sorted(by.items()) if len(hs) == len(accts)]
+
+
+def pool_cols(accts, ws, now, lv):
+    """Left and right column of the pooled view. Daily budget = what each account has left per day up to its own
+    reset, averaged like the use."""
+    hist, left, right = pool_history(accts), "", ""
+    own = [w for a in accts for w in windows(a["limits"], now) if w[0] == "seven_day"]
+    fcs = [week_forecast(w[1], w[2]) for w in own]
+    fc = sum(fcs) / len(fcs) if fcs and None not in fcs else None   # each account to its own reset; the blended clock misleads
+    for key, u, frac, reset, length in ws:
+        txt, hot = win_txt(key, u, frac, reset, length, hist, now, lv, fc)
+        if key != "seven_day":
+            right += lim_row(key, u, frac, hot, lv, txt)
+            continue
+        left = big_row(u, lv, pet_html(ws, any(a["avail"] for a in accts))) + f'{meter(u, frac, hot, lv)}<p class="fc">{txt}</p>'
+        per = [(100 - w[1]) / max((w[3] - now) / 86400, 1) for w in own if w[1] < 100 and w[3]]
+        if per:
+            left += f'<p class="why">{tr("lim.budget", pct=pc(sum(per) / len(accts)))}</p>'
+    return left, right
 
 
 def acct_block(a, now, lv):
@@ -2179,8 +2234,7 @@ def acct_block(a, now, lv):
     for key, u, frac, reset, length in windows(a["limits"], now):
         txt, hot = win_txt(key, u, frac, reset, length, hist, now, lv)
         bud = f'<div class="why">{budget(u, reset, now)}</div>' if key == "seven_day" and u < 100 and reset else ""
-        row = (f'<div class="lim"><div class="row"><span>{tr("lim.week" if key == "seven_day" else "win." + key)}</span>'
-               f'<b>{tr("lim.left", p=pc(100 - u)) if lv else pc(u)}</b></div>{meter(u, frac, hot, lv)}<div class="why">{txt}</div>{bud}</div>')
+        row = lim_row(key, u, frac, hot, lv, txt, bud)
         if key == "seven_day":
             wk = row
         else:
@@ -2197,14 +2251,16 @@ def limits_card(week_cost, split=None):
         return f'<section class="card"><h2>{tr("lim.title")}</h2><p class="hint">{tr("lim.unavailable")}</p></section>'
     hist, left, right, week = limit_history(), "", "", None
     lv = SET["limit_view"] == "left"
+    accts = STATE["accts"] if len(STATE["accts"]) > 1 else []
+    pw = pooled(accts, now) if accts and all(a["limits"] for a in accts) else []
+    pet = "" if pw else pet_html(windows(L, now), all(a["avail"] for a in STATE["accts"] if a["primary"]))
     for key, u, frac, reset, length in windows(L, now):
         start = reset - length if reset else now
         txt, hot = win_txt(key, u, frac, reset, length, hist, now, lv)
         if key == "seven_day":
             fc = week_forecast(u, frac)
             week = (start, reset, length, u, fc)
-            left = (f'<div class="lbl">{tr("lim.week")}</div><div class="bigrow"><div class="big">{nf(100 - u if lv else u)}<span>{tr("lim.unit.left" if lv else "lim.unit")}</span></div>{pet_html(now)}</div>'
-                    f'{meter(u, frac, hot, lv)}<p class="fc">{txt}</p>')
+            left = big_row(u, lv, pet) + f'{meter(u, frac, hot, lv)}<p class="fc">{txt}</p>'
             if u < 100 and reset:
                 left += f'<p class="why">{budget(u, reset, now)}</p>'
             more = ""
@@ -2227,8 +2283,7 @@ def limits_card(week_cost, split=None):
             if more:
                 left += f'<details class="more"><summary>{tr("lim.more")}</summary>{more}</details>'
             continue
-        right += (f'<div class="lim"><div class="row"><span>{tr("win." + key)}</span><b>{tr("lim.left", p=pc(100 - u)) if lv else pc(u)}</b></div>'
-                  f'{meter(u, frac, hot, lv)}<div class="why">{txt}</div></div>')
+        right += lim_row(key, u, frac, hot, lv, txt)
     x = L.get("extra_usage") or {}
     if x.get("is_enabled") and x.get("monthly_limit"):
         dp, used = 10 ** (x.get("decimal_places") or 0), x.get("used_credits") or 0
@@ -2263,11 +2318,18 @@ def limits_card(week_cost, split=None):
     stamp = tr("lim.stale", at=when(STATE["ok"], "daytime")) if stale else tr("lim.stamp", at=hm(STATE["ok"]))
     if STATUS.get("indicator") not in (None, "none"):
         stamp += "<br>" + tr("lim.status", desc=html.escape(STATUS.get("description", "")), url=STATUS_URL)
-    accts = STATE["accts"] if len(STATE["accts"]) > 1 else []
     top = "".join(acct_head(a, now) for a in accts if a["primary"])
     rest = "".join(acct_block(a, now, lv) for a in accts if not a["primary"])
-    return (f'<section class="card hero" aria-label="{tr("lim.title")}">{top}<div>{left}</div><div>{right}'
-            f'<p class="why">{stamp}</p></div>{spark}{rest}</section>')
+    if not pw:
+        return (f'<section class="card hero" aria-label="{tr("lim.title")}">{top}<div>{left}</div><div>{right}'
+                f'<p class="why">{stamp}</p></div>{spark}{rest}</section>')
+    # Several accounts: one pooled view, today's per-account view folded below (app.js remembers it open per device)
+    pl, pr = pool_cols(accts, pw, now, lv)
+    return (f'<section class="card hero" aria-label="{tr("lim.title")}"><div class="acct"><span class="who">{tr("lim.pool")}</span></div>'
+            f'<div>{pl}</div><div>{pr}<p class="why">{stamp}</p></div>'
+            f'<details class="more accts" id="accts"><summary>{tr("lim.pool.each", n=len(accts))}</summary>'
+            f'<div class="hero-in">{top}<div>{left}</div><div>{right}</div>{spark}{rest}</div></details>'
+            f'<script>if(localStorage.accts)document.getElementById("accts").open=true</script></section>')
 
 
 def layout(title, active, p, h1, sub, body, tabs=True, keep=None, back=""):
@@ -3942,11 +4004,11 @@ def selftest():
         assert pet("bot", "calm", 0).count('opacity="1"') == 4 and pet("bot", "calm", 80).count('opacity="1"') == 1
         assert 'y="44"' in pet("coffee", "calm", 0) and 'y="98"' in pet("coffee", "tight", 100)   # full / empty mug
         W = lambda f, w: {"five_hour": {"utilization": f, "resets_at": iso(nw + 3600)}, "seven_day": {"utilization": w, "resets_at": iso(nw + 3.5 * 86400)}}
-        assert pet_state(W(0, 20), True, nw) == pet_state(W(49, 20), True, nw) == pet_state(None, True, nw) == "calm" and pet_state(W(50, 20), True, nw) == "work"
-        assert pet_state(W(86, 20), True, nw) == "tight" and pet_state(W(10, 45), True, nw) == "calm"   # follows the 5 h window, not the week forecast
+        assert pet_state(windows(W(0, 20), nw), True) == pet_state(windows(W(49, 20), nw), True) == pet_state(windows(None, nw), True) == "calm" and pet_state(windows(W(50, 20), nw), True) == "work"
+        assert pet_state(windows(W(86, 20), nw), True) == "tight" and pet_state(windows(W(10, 45), nw), True) == "calm"   # follows the 5 h window, not the week forecast
         wonly = {"seven_day": W(0, 45)["seven_day"]}
-        assert pet_state(wonly, True, nw) == "tight" and pet_window(wonly, nw)[:2] == ("seven_day", 45.0) and pet_window(W(30, 70), nw)[:2] == ("five_hour", 30.0)
-        assert pet_state(W(100, 20), True, nw) == pet_state(W(10, 100), True, nw) == pet_state(W(10, 20), False, nw) == "limit"
+        assert pet_state(windows(wonly, nw), True) == "tight" and pet_window(windows(wonly, nw))[:2] == ("seven_day", 45.0) and pet_window(windows(W(30, 70), nw))[:2] == ("five_hour", 30.0)
+        assert pet_state(windows(W(100, 20), nw), True) == pet_state(windows(W(10, 100), nw), True) == pet_state(windows(W(10, 20), nw), False) == "limit"
         STATE["limits"] = W(10, 20)
         c = limits_card(None)
         assert c.count('<span class="pet" data-st="calm" role="img" aria-label="Mascot: calm') == 1 and 'class="pet-calm"' in c and 'class="pet-work"' not in c, c
@@ -3954,7 +4016,13 @@ def selftest():
         assert 'data-st="work"' in limits_card(None)
         STATE["limits"] = W(10, 20)
         STATE["accts"] = [A("w1", "work", STATE["limits"], use=True, primary=True, avail=False), A("p2", "personal", W(1, 1), next=True)]
-        assert 'data-st="limit"' in limits_card(None) and 'class="pet-work"' not in limits_card(None)   # the account in use is benched
+        c = limits_card(None)   # two accounts: pooled view (mean of 10/20 and 1/1), the per-account view folded below
+        assert c.count('class="pet"') == 1 and 'data-st="calm"' in c and 'id="accts"' in c and "2 accounts" in c and ">10<" in c, c
+        assert [w[:2] for w in pooled(STATE["accts"], nw)] == [("five_hour", 5.5), ("seven_day", 10.5)]
+        STATE["accts"][1]["avail"] = False
+        assert 'data-st="limit"' in limits_card(None)   # all accounts benched
+        STATE["accts"][1]["limits"] = None
+        assert 'id="accts"' not in limits_card(None) and 'data-st="limit"' in limits_card(None)   # one without data: per account as before
         STATE["accts"], STATE["limits"] = acc0, W(90, 20)
         assert 'data-st="tight"' in limits_card(None) and limits_card(None).count("<svg class=\"pet-") == 1
         SET["pet"] = "terminal"

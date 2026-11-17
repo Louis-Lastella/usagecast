@@ -52,6 +52,9 @@ der Budget-Wächter greift erst, wenn alle Konten knapp sind. Mit einem Konto si
 welchem Modell, dazu ihre Subagenten. Aktualisiert sich alle 5 Sekunden, solange die Seite offen ist, und warnt, wenn
 das Hermes-Gateway nicht läuft.
 
+**Mehrere Konten:** Die Limit-Karte zeigt zuerst alle Konten zusammen als eins (Mittelwert, nächster Reset); "2 Konten"
+klappt jedes Konto einzeln auf, und das Gerät merkt sich, ob es offen war.
+
 **Maskottchen:** Neben der großen Wochenzahl sitzt ein animierter Begleiter: Terminal, Debug-Ente, Server-Rack, Kaffee
 oder Bot. Er folgt dem 5-Stunden-Fenster (ohne eins der Woche) und hat vier Stimmungen, je nachdem wie voll das Fenster
 ist: ruhig, beschäftigt ab 50 %, knapp ab 85 % (oder knappe Prognose) und schlafend am Limit. Kaffeestand und Bot-Akku zeigen, was übrig ist. Er folgt hell und

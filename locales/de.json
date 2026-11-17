@@ -148,6 +148,8 @@
   "lim.fc.linear": "Die Prognose ist eine gerade Linie aus dem bisherigen Tempo. Dein Wochenrhythmus war im Rückblick nicht klar genauer ({wtd} gegen {lin} Abweichung im Schnitt).",
   "lim.budget": "Tagesbudget: etwa <strong>{pct} pro Tag</strong> bis zum Reset.",
   "lim.more": "Mehr zur Woche",
+  "lim.pool": "Alle Konten",
+  "lim.pool.each": "{n} Konten",
   "lim.five.full_at": "<strong class=\"hot\">Zu schnell:</strong> beim Tempo der letzten Stunde in {left} voll (ca. {full}). {reset}",
   "lim.five.enough": "<strong>Im Plan:</strong> ca. {at} beim Reset um {reset}.",
   "lim.five.tight": "<strong class=\"hot\">Knapp:</strong> ca. {at} beim Reset um {reset}.",

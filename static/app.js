@@ -4,6 +4,10 @@
 let tg = false
 try { tg = location.hash.includes("tgWebAppData") || !!sessionStorage.getItem("__telegram__initParams") } catch (e) {}
 
+// Limits card with several accounts: the device remembers whether the per-account view was open
+const accts = document.getElementById("accts")
+if (accts) accts.addEventListener("toggle", () => { try { localStorage.accts = accts.open ? "1" : "" } catch (e) {} })
+
 setInterval(async () => {
   const card = document.getElementById("live")
   if (!card || document.hidden) return

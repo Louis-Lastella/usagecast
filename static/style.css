@@ -97,6 +97,8 @@ details.range span{color:var(--faint)}
 .lim .row>span{font-weight:500}
 .lim .row b{font:600 15px var(--display);font-variant-numeric:tabular-nums;white-space:nowrap}
 .lim .meter{height:6px}.lim .meter .now{top:-4px;height:14px}
+.hero>.accts{grid-column:1/-1;margin-top:4px}
+.hero-in{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:8px 52px;margin-top:14px;padding-top:18px;border-top:1px solid var(--line)}
 .hero .trend{grid-column:1/-1;margin-top:14px;padding-top:16px;border-top:1px solid var(--line)}
 .hero .acct{grid-column:1/-1;display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px}
 .hero .acct~.acct{margin-top:14px;padding-top:18px;border-top:1px solid var(--line)}
@@ -370,7 +372,7 @@ main{padding:max(22px,calc(env(safe-area-inset-top) + 14px)) 16px calc(92px + en
 .set input[type=checkbox]{width:46px;height:28px}.set input[type=checkbox]::before{width:24px;height:24px}.set input[type=checkbox]:checked::before{transform:translateX(18px)}
 h1{font-size:25px}
 .sec{margin-top:36px}
-.g2,.hero{grid-template-columns:minmax(0,1fr)}
+.g2,.hero,.hero-in{grid-template-columns:minmax(0,1fr)}
 .hero{padding:22px 20px}
 .big{font-size:68px}
 .pet{width:92px;height:92px;margin-right:0}

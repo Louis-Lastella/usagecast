@@ -2,6 +2,13 @@
 
 Versions follow [Semantic Versioning](https://semver.org).
 
+## 3.9.0 - 2026-11-17
+
+- Several accounts: the limits card opens with all of them as one ("All accounts"): the mean use of the week and the
+  5-hour window (100 % = all full), the next reset, a week forecast that averages each account's own forecast and a
+  daily budget that counts each account up to its own reset. The mascot follows the pooled 5-hour window. "2 accounts"
+  folds out today's per-account view with the trend; the device remembers whether it was open. One account: unchanged.
+
 ## 3.8.2 - 2026-11-17
 
 - The mascot's mood now comes from its window alone: calm below 50 %, busy from 50 %, tight from 85 %, asleep at the

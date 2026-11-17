@@ -148,6 +148,8 @@
   "lim.fc.linear": "The forecast is a straight line from the pace so far. Your weekly rhythm was not clearly more accurate in a backtest ({wtd} against {lin} off on average).",
   "lim.budget": "Daily budget: about <strong>{pct} per day</strong> until the reset.",
   "lim.more": "More on this week",
+  "lim.pool": "All accounts",
+  "lim.pool.each": "{n} accounts",
   "lim.five.full_at": "<strong class=\"hot\">Too fast:</strong> full in {left} at the pace of the last hour (around {full}). {reset}",
   "lim.five.enough": "<strong>On track:</strong> about {at} at the reset at {reset}.",
   "lim.five.tight": "<strong class=\"hot\">Tight:</strong> about {at} at the reset at {reset}.",
