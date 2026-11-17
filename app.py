@@ -1746,6 +1746,22 @@ def ensure_snap():
                 print("snapshot:", e, flush=True)
 
 
+def acct_name():
+    """Label of the primary account when there are several, else "" (one account: nothing to name)."""
+    a = next((a for a in STATE["accts"] if a["primary"]), None) if len(STATE["accts"]) > 1 else None
+    return (a["label"] or a["id"][:8]) if a else ""
+
+
+def tg_texts(wk, fh, fc, n, now, name=""):
+    """Menu button text (short: it is a button) and pinned message; `name` = primary account when there are several."""
+    menu = tr("tg.menu.text", w=round(wk[0]), f=round(fh[0]))
+    pin = [tr("tg.pin.week", w=round(wk[0]), fc=round(fc) if fc is not None else "–"),
+           tr("tg.pin.five", f=round(fh[0]), at=hm(fh[2]) if fh[2] else "–"), tr("live.n", n=n), tr("tg.pin.at", at=hm(now))]
+    if name:
+        menu, pin = tr("apin.menu", label=name[:12], w=round(wk[0]), f=round(fh[0])), [tr("apin.pin", label=name)] + pin
+    return menu, "\n".join(pin)
+
+
 def tg_status():
     """10-minute step: the limits as the text of the bot's menu button, and one pinned status message edited in place."""
     t, L = tg_target(), STATE["limits"]
@@ -1759,16 +1775,15 @@ def tg_status():
     wk, fh = win.get("seven_day"), win.get("five_hour")
     if not wk or not fh:
         return
+    fc = week_forecast(wk[0], wk[1]) if wk[1] is not None else None
+    menu, pin = tg_texts(wk, fh, fc, live()["n"], now, acct_name())
     if SET["tg_menu"]:
-        text = tr("tg.menu.text", w=round(wk[0]), f=round(fh[0]))
+        text = menu
         if st.get("menu") != text and tg_call("setChatMenuButton", chat_id=t[1], menu_button={
                 "type": "web_app", "text": text, "web_app": {"url": SET["url"] + "/"}})[0]:
             st["menu"] = text
     if SET["tg_pin"]:
-        fc = week_forecast(wk[0], wk[1]) if wk[1] is not None else None
-        text = "\n".join((tr("tg.pin.week", w=round(wk[0]), fc=round(fc) if fc is not None else "–"),
-                          tr("tg.pin.five", f=round(fh[0]), at=hm(fh[2]) if fh[2] else "–"),
-                          tr("live.n", n=live()["n"]), tr("tg.pin.at", at=hm(now))))
+        text = pin
         if st.get("pin_text") != text:
             ok, r = tg_call("editMessageText", chat_id=t[1], message_id=st["pin"], text=text, **tg_open(t)) if st.get("pin") else (False, "400 new")
             ok = ok or "not modified" in str(r)
@@ -2036,6 +2051,10 @@ def api_summary():
         est = overrun_usd((w or {}).get("forecast"))
         if est is not None:
             out["extra"]["estimate_usd"] = round(est, 2)   # credits the week would need at this pace
+    if len(STATE["accts"]) > 1:   # the fields above describe the primary one
+        out["accounts"] = [{"label": a["label"] or a["id"][:8], "use": a["use"], "next": a["next"], "primary": a["primary"],
+                            **{k: ((a["limits"] or {}).get(k) or {}).get("utilization")
+                               for k in ("five_hour", "seven_day")}} for a in STATE["accts"]]
     out["agents"] = live()["n"]
     d = data_for("w")
     out["week_cost_usd"] = round(d["total"], 2) if d["week"] else None
@@ -3351,6 +3370,10 @@ def demo():
     STATE.update(limits={"five_hour": {"utilization": 34.0, "resets_at": iso(five)}, "seven_day": {"utilization": 62.0, "resets_at": iso(reset)},
                          "extra_usage": {"is_enabled": True, "used_credits": 501, "monthly_limit": 2500, "decimal_places": 2, "currency": "USD"}},
                  at=1e12, ok=now)   # at far ahead: refresh_limits() never fetches
+    other = {"five_hour": {"utilization": 3.0, "resets_at": None}, "seven_day": {"utilization": 8.0, "resets_at": iso(reset)}}
+    STATE["accts"] = [   # two pooled accounts: "work" is in use, "personal" is next
+        dict(id="a1", label="work", use=True, next=False, primary=True, avail=True, status=None, limits=STATE["limits"], error=None),
+        dict(id="a2", label="personal", use=False, next=True, primary=False, avail=True, status=None, limits=other, error=None)]
     (DATA / "ingest").mkdir()   # a laptop that reports its Claude Code usage in the evenings
     (DATA / "ingest" / "macbook.json").write_text(json.dumps({"host": "macbook", "at": round(now - 300), "hours": [
         [h, 0.8 + 0.1 * (h // 3600 % 5)] for h in range(int(now - 7 * 86400) // 3600 * 3600, int(now), 3600)
@@ -3674,6 +3697,15 @@ def selftest():
             ac[1]["usage"] = U(3, 1)
             refresh_limits(0)
             assert STATE["limits"] == U(3, 1) and [a["use"] for a in STATE["accts"]] == [False, True], STATE["accts"]
+            _req.lang = "en"   # w1 (work) and p2 (personal, primary): the texts name the primary account, one account stays as before
+            wk_, fh_ = (62.0, 0.5, 0), (34.0, 0.5, nw + 60)
+            menu_, pin_ = tg_texts(wk_, fh_, 70, 1, nw, acct_name())
+            m1_, p1_ = tg_texts(wk_, fh_, 70, 1, nw)
+            assert acct_name() == "personal" and menu_ == "personal · W 62% · 5h 34%" and pin_.splitlines()[0] == "Account: personal", (menu_, pin_)
+            assert m1_ == "W 62% · 5h 34%" and p1_ == pin_.split("\n", 1)[1] and "Account" not in p1_
+            assert json.loads(api_summary())["accounts"] == [
+                {"label": "work", "use": False, "next": True, "primary": False, "five_hour": 10, "seven_day": 20},
+                {"label": "personal", "use": True, "next": False, "primary": True, "five_hour": 3, "seven_day": 1}], api_summary()
             with open(DATA / "limits.jsonl", "a") as fh:
                 fh.write(json.dumps({"t": nw, "seven_day": 2}) + "\n")   # rows without "a" belong to the primary account
             assert [h["seven_day"] for h in limit_history()] == [0, 1, 2] and [h["seven_day"] for h in limit_history(acct="w1")] == [20, 20]
@@ -3684,6 +3716,7 @@ def selftest():
             refresh_limits(0)
             assert STATE["limits"] == U(7, 8) and "\"a\"" not in (DATA / "limits.jsonl").read_text().splitlines()[-1]
             assert [h["seven_day"] for h in limit_history()] == [2, 8]   # single account: untagged rows only
+            assert acct_name() == "" and "accounts" not in json.loads(api_summary())
         finally:
             subprocess.run = run0
             STATE.clear(); STATE.update(st0)
