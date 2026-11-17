@@ -47,7 +47,7 @@ limit number 80/600 (-0.04em) · KPI 26/600. Labels are sentence case, never upp
 - Phone (<= 860 px): the sidebar becomes a bottom tab bar with labels; every control is >= 40-44 px tall.
 - Motion: only 150-200 ms state feedback (switches, folds); nothing animates on load and zoom is locked on phones.
   `prefers-reduced-motion` turns it all off.
-  Exception: the mascot top right of the limits card (`pets.py`, setting `pet`) loops quietly (1-4 s) to show its mood
+  Exception: the mascot beside the big weekly number (`pets.py`, setting `pet`) loops quietly (1-4 s) to show its mood
   (calm, agent working, tight, at the limit); its colors are the `--pet-*` tokens, and reduced motion stops it too.
 - Haptics: a tapped control (tab, chip, button, fold, switch) gives a short vibration, `static/haptics.js`. iOS has no
   Vibration API, so a transparent label tied to a hidden `<input type=checkbox switch>` covers each control; Android

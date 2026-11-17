@@ -4,7 +4,7 @@ Versions follow [Semantic Versioning](https://semver.org).
 
 ## 3.8.0 - 2026-11-17
 
-- Mascots: a small animated companion sits in the limits card (terminal, rubber duck, server rack, coffee or bot). It
+- Mascots: an animated companion sits beside the big weekly number (terminal, rubber duck, server rack, coffee or bot). It
   shows four moods from the account in use: calm, an agent is working, tight (a window at 85 % or a tight week forecast)
   and at the limit. Coffee level and bot battery follow what is left of the week. It switches between calm and working
   without a reload, follows light and dark mode, and stops moving with reduced motion. Pick one or turn it off in

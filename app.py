@@ -2200,7 +2200,7 @@ def limits_card(week_cost, split=None, running=0):
         if key == "seven_day":
             fc = week_forecast(u, frac)
             week = (start, reset, length, u, fc)
-            left = (f'<div class="lbl">{tr("lim.week")}</div><div class="big">{nf(100 - u if lv else u)}<span>{tr("lim.unit.left" if lv else "lim.unit")}</span></div>'
+            left = (f'<div class="lbl">{tr("lim.week")}</div><div class="bigrow"><div class="big">{nf(100 - u if lv else u)}<span>{tr("lim.unit.left" if lv else "lim.unit")}</span></div>{pet_html(running, now)}</div>'
                     f'{meter(u, frac, hot, lv)}<p class="fc">{txt}</p>')
             if u < 100 and reset:
                 left += f'<p class="why">{budget(u, reset, now)}</p>'
@@ -2263,7 +2263,7 @@ def limits_card(week_cost, split=None, running=0):
     accts = STATE["accts"] if len(STATE["accts"]) > 1 else []
     top = "".join(acct_head(a, now) for a in accts if a["primary"])
     rest = "".join(acct_block(a, now, lv) for a in accts if not a["primary"])
-    return (f'<section class="card hero" aria-label="{tr("lim.title")}">{pet_html(running, now)}{top}<div>{left}</div><div>{right}'
+    return (f'<section class="card hero" aria-label="{tr("lim.title")}">{top}<div>{left}</div><div>{right}'
             f'<p class="why">{stamp}</p></div>{spark}{rest}</section>')
 
 

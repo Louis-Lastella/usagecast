@@ -113,10 +113,10 @@ svg.spark .w{stroke:var(--acc)}svg.spark .fcl{stroke:var(--acc);stroke-dasharray
 .dash{display:inline-block;width:14px;margin:0 6px 0 12px;vertical-align:middle;border-top:2px dashed var(--acc)}.dash.cap{border-top:1px solid var(--fill)}
 .trend .lg{margin:6px 0 0;font-size:12px;color:var(--faint)}.trend .lg .dot,.trend .lg .dash{margin-left:0}
 .hero strong.hot{color:var(--acc-ink)}
-/* mascot (pets.py), top right of the limits card; calm and work are both rendered and data-st picks one */
-.hero{position:relative}
-.pet{position:absolute;top:18px;right:22px;width:64px;height:64px;pointer-events:none}
-.hero>.pet+div:not(.acct)+div{padding-top:56px}.hero>.pet+.acct+div+div{padding-top:26px}.hero>.pet+.acct{padding-right:76px}
+/* mascot (pets.py), beside the big weekly number; calm and work are both rendered and data-st picks one */
+
+.bigrow{display:flex;align-items:center;justify-content:space-between;gap:16px}
+.pet{flex:none;width:112px;height:112px;margin-right:8px;pointer-events:none}
 .pet svg{display:block;width:100%;height:100%;overflow:visible}
 .pet[data-st=calm] .pet-work,.pet[data-st=work] .pet-calm{display:none}
 .pet [class]{transform-box:fill-box;transform-origin:center}
@@ -374,7 +374,7 @@ h1{font-size:25px}
 .g2,.hero{grid-template-columns:minmax(0,1fr)}
 .hero{padding:22px 20px}
 .big{font-size:68px}
-.pet{top:16px;right:16px}.hero>.pet+div:not(.acct)+div,.hero>.pet+.acct+div+div{padding-top:0}
+.pet{width:92px;height:92px;margin-right:0}
 .kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
 .kpi{padding:14px 16px}
 .kpi.main{grid-column:1/-1}
