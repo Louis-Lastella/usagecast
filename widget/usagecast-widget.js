@@ -62,8 +62,9 @@ try {
   if (code !== 200) throw new Error(lock ? "HTTP " + code : "HTTP " + code + ": not the dashboard. Check address and port.");
   const s = JSON.parse(raw);
   const week = s.limits.seven_day, five = s.limits.five_hour;
+  const acct = ((s.accounts || []).find((a) => a.primary) || {}).label;   // only sent with several accounts
   if (family === "accessoryInline") {
-    text(w, "Week " + Math.round(week.used) + "%" + (five ? " · 5h " + Math.round(five.used) + "%" : ""), L.ink, Font.systemFont(12));
+    text(w, (acct ? acct + " · " : "") + "Week " + Math.round(week.used) + "%" + (five ? " · 5h " + Math.round(five.used) + "%" : ""), L.ink, Font.systemFont(12));
   } else if (family === "accessoryCircular") {
     w.addImage(ring(week.used)).centerAlignImage();
   } else if (family === "accessoryRectangular") {
@@ -72,8 +73,10 @@ try {
     bar(w, week.used, 130, false, 4, L.soft, L.ink);
     w.addSpacer(4);
     if (five) text(w, "5h " + Math.round(five.used) + "%" + (five.resets_at ? " · " + hm(five.resets_at) : ""), L.mute, Font.systemFont(12));
+    if (acct) text(w, acct, L.mute, Font.systemFont(12));
   } else {
     text(w, "Weekly limit", C.mute, Font.mediumSystemFont(11));
+    if (acct) text(w, acct, C.mute, Font.systemFont(10));
     text(w, Math.round(week.used) + "%", C.ink, Font.semiboldSystemFont(30));
     bar(w, week.used, 120, week.used >= 80 || week.forecast > 100);   // week won't last: hot
     w.addSpacer(4);
