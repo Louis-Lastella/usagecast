@@ -7,6 +7,8 @@
 --acc:light-dark(#ec7a1c,#f28a3a);--acc-ink:light-dark(#ad540c,#f5a05c);--wash:light-dark(#fdf0e3,#33241a);
 --track:light-dark(#efedea,#292724);--fill:light-dark(#8f8982,#7a746e);--tint:light-dark(#f4f2ef,#22211f);--soft:light-dark(#cfcac4,#4d4945);--seg:light-dark(#edebe8,#232220);
 --shc:light-dark(rgb(28 26 24/.06),rgb(0 0 0/.35));
+--pet-ink:light-dark(#3d3935,#b9b2aa);--pet-body:light-dark(#e2dad0,#3d3934);--pet-paper:light-dark(#fff,#2a2825);--pet-scr:light-dark(#2a2724,#121110);--pet-glow:#f5a05c;
+--pet-orl:light-dark(#f5a05c,#c97a3c);--pet-ord:light-dark(#c2410c,#ef6a2e);--pet-grey:light-dark(#8f8982,#8a847d);--pet-brew:light-dark(#d9a77a,#8a5a35);--pet-foam:light-dark(#f3e3d4,#b48960);
 --c0:light-dark(#ec7a1c,#f28a3a);--c1:light-dark(#f4b47c,#a15d27);--c2:light-dark(#a9a39d,#7a746e);--c3:light-dark(#6f6963,#5a554f);--c4:light-dark(#d5d1cc,#423e3a);--c5:light-dark(#e9e7e4,#312e2b);
 --h0:light-dark(#efedea,#232120);--h1:light-dark(#fadcc0,#4a2e17);--h2:light-dark(#f4b170,#7b471d);--h3:light-dark(#ea852f,#b9672a);--h4:light-dark(#c45f10,#f39a52);
 --sans:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI Variable Text","Segoe UI",system-ui,Roboto,"Helvetica Neue",Arial,sans-serif;
@@ -111,6 +113,39 @@ svg.spark .w{stroke:var(--acc)}svg.spark .fcl{stroke:var(--acc);stroke-dasharray
 .dash{display:inline-block;width:14px;margin:0 6px 0 12px;vertical-align:middle;border-top:2px dashed var(--acc)}.dash.cap{border-top:1px solid var(--fill)}
 .trend .lg{margin:6px 0 0;font-size:12px;color:var(--faint)}.trend .lg .dot,.trend .lg .dash{margin-left:0}
 .hero strong.hot{color:var(--acc-ink)}
+/* mascot (pets.py), top right of the limits card; calm and work are both rendered and data-st picks one */
+.hero{position:relative}
+.pet{position:absolute;top:18px;right:22px;width:64px;height:64px;pointer-events:none}
+.hero>.pet+div:not(.acct)+div{padding-top:56px}.hero>.pet+.acct+div+div{padding-top:26px}.hero>.pet+.acct{padding-right:76px}
+.pet svg{display:block;width:100%;height:100%;overflow:visible}
+.pet[data-st=calm] .pet-work,.pet[data-st=work] .pet-calm{display:none}
+.pet [class]{transform-box:fill-box;transform-origin:center}
+.pet .pet-code,.pet .pet-fan1,.pet .pet-fan2,.pet .pet-fan3,.pet .pet-gear{transform-box:view-box;transform-origin:0 0}
+.pet .pet-breathe,.pet .pet-nod,.pet .pet-stir{transform-origin:center bottom}
+.pet-off{opacity:.15}
+@keyframes pet-bob{50%{transform:translateY(-3px)}}.pet-bob{animation:pet-bob 2s ease-in-out infinite}
+@keyframes pet-bob2{50%{transform:translateY(-2px) rotate(-2deg)}}.pet-bob2{animation:pet-bob2 4s ease-in-out infinite}
+@keyframes pet-breathe{50%{transform:scale(1.04)}}.pet-breathe{animation:pet-breathe 4s ease-in-out infinite}
+@keyframes pet-shake{0%,30%,100%{transform:none}5%,15%,25%{transform:translateX(-1.5px)}10%,20%{transform:translateX(1.5px)}}.pet-shake{animation:pet-shake 1s linear infinite}
+@keyframes pet-blink{0%,92%,100%{transform:scaleY(1)}96%{transform:scaleY(.1)}}.pet-blink{animation:pet-blink 4s infinite}
+@keyframes pet-dart{0%,40%{transform:none}50%,90%{transform:translateX(1.5px)}}.pet-dart{animation:pet-dart 2s infinite}
+@keyframes pet-talk{50%{transform:scaleY(.4)}}.pet-talk{animation:pet-talk 1s infinite}
+@keyframes pet-nod{50%{transform:rotate(-5deg)}}.pet-nod{animation:pet-nod 1s ease-in-out infinite}
+@keyframes pet-pop{50%{transform:scale(1.06)}}.pet-pop{animation:pet-pop 1s ease-in-out infinite}
+@keyframes pet-zz{0%{opacity:0;transform:translate(0,4px)}30%{opacity:1}100%{opacity:0;transform:translate(6px,-12px)}}.pet-zz{animation:pet-zz 2s linear infinite}.pet-d2{animation-delay:-1s}
+@keyframes pet-drip{80%{opacity:1}100%{transform:translateY(8px);opacity:0}}.pet-drip{animation:pet-drip 1s ease-in infinite}
+@keyframes pet-cursor{50%{opacity:0}}.pet-cursor{animation:pet-cursor 1s steps(1) infinite}
+@keyframes pet-blinkfast{50%{opacity:.25}}.pet-blinkfast{animation:pet-blinkfast 1s steps(1) infinite}
+@keyframes pet-standby{0%,100%{opacity:.2}50%{opacity:1}}.pet-standby{animation:pet-standby 4s ease-in-out infinite}
+@keyframes pet-pulse{50%{opacity:.35}}.pet-pulse{animation:pet-pulse 2s ease-in-out infinite}
+@keyframes pet-code{to{transform:translateY(-48px)}}.pet-code{animation:pet-code 2s linear infinite}
+@keyframes pet-wave{to{transform:translateX(-32px)}}.pet-wave{animation:pet-wave 2s linear infinite}
+@keyframes pet-spin{to{transform:rotate(360deg)}}.pet-fan3{animation:pet-spin 4s linear infinite}.pet-fan2{animation:pet-spin 2s linear infinite}.pet-fan1{animation:pet-spin 1s linear infinite}
+@keyframes pet-gear{to{transform:rotate(45deg)}}.pet-gear{animation:pet-gear 1s linear infinite}
+@keyframes pet-pkt{to{stroke-dashoffset:-14}}.pet-pkt2{animation:pet-pkt 2s linear infinite}.pet-pkt1{animation:pet-pkt 1s linear infinite}
+@keyframes pet-rise{0%{transform:translateY(4px);opacity:0}40%{opacity:1}100%{transform:translateY(-10px);opacity:0}}.pet-heat,.pet-steam1{animation:pet-rise 1s ease-out infinite}.pet-steam2{animation:pet-rise 2s ease-out infinite}
+@keyframes pet-stir{0%,100%{transform:rotate(-8deg)}50%{transform:rotate(8deg)}}.pet-stir{animation:pet-stir 1s ease-in-out infinite}
+@keyframes pet-charge{0%,49%{opacity:.15}50%,90%{opacity:1}}.pet-charge{animation:pet-charge 2s steps(1) infinite}
 /* disclosure for the longer explanations (limit card, ranked bars) */
 details.more{margin-top:12px}
 details.more>summary,details.bar>summary,details.adv>summary{list-style:none;cursor:pointer}
@@ -302,6 +337,7 @@ h1{font-size:25px}
 .g2,.hero{grid-template-columns:minmax(0,1fr)}
 .hero{padding:22px 20px}
 .big{font-size:68px}
+.pet{top:16px;right:16px}.hero>.pet+div:not(.acct)+div,.hero>.pet+.acct+div+div{padding-top:0}
 .kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
 .kpi{padding:14px 16px}
 .kpi.main{grid-column:1/-1}

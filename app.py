@@ -19,6 +19,8 @@ from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
 
 ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(ROOT))   # pets.py next to this file, also when run through exec() or runpy
+from pets import KINDS as PETS, STATES as MOODS, pet   # noqa: E402
 # USAGECAST_ROOT: snapshot() sets it before pointing HERMES_HOME at a profile; Hermes re-runs this script on import
 HERMES = Path(os.environ.get("USAGECAST_ROOT") or os.environ.get("HERMES_HOME") or Path.home() / ".hermes")
 HERMES_PY = HERMES / "hermes-agent" / "venv" / "bin" / "python"
@@ -109,10 +111,11 @@ DEFAULTS = {
     "guard": False, "guard_jobs": [], "ingest_token": "",
     "quiet": False, "quiet_from": "22:00", "quiet_to": "07:00",
     "push": "own" if _TOPIC else "off", "ntfy_server": _SRV, "ntfy_topic": _TOPIC, "ntfy_token": "", "url": PUBLIC_URL,
-    "tg_bot": "off", "tg_thread": "", "tg_menu": True, "tg_pin": True,
+    "tg_bot": "off", "tg_thread": "", "tg_menu": True, "tg_pin": True, "pet": "terminal",
 }
 CHOICES = {"theme": ("system", "light", "dark"), "lang": tuple(LOC), "currency": ("USD", "EUR"), "numbers": ("compact", "full"),
-           "period": tuple(PERIODS), "limit_view": ("used", "left"), "cost_unit": ("money", "week"), "push": ("off", "own", "hermes", "telegram")}
+           "period": tuple(PERIODS), "limit_view": ("used", "left"), "cost_unit": ("money", "week"), "push": ("off", "own", "hermes", "telegram"),
+           "pet": ("off", *PETS)}
 RANGES = {"five_min": (5, 240), "chat_pct": (0.1, 50.0), "spike_pct": (0.5, 50.0)}
 URL_RX = r"https?://[^\s\"'<>]+"
 HHMM = r"([01]\d|2[0-3]):[0-5]\d"
@@ -2131,6 +2134,28 @@ def acct_head(a, now):
     return f'<div class="acct"><span class="who">{e(a["label"] or a["id"])}</span>{tag}</div>'
 
 
+def pet_state(L, avail, running, now):
+    """Mascot mood: limit (a window full or the account not available) > tight (week forecast >= TIGHT or a window
+    >= 85 %) > work (an agent is running) > calm."""
+    ws = windows(L, now)
+    if not avail or any(u >= 100 for _, u, *_ in ws):
+        return "limit"
+    if any(u >= 85 or k == "seven_day" and (week_forecast(u, f) or 0) >= TIGHT for k, u, f, *_ in ws):
+        return "tight"
+    return "work" if running else "calm"
+
+
+def pet_html(running, now):
+    """The mascot for the account in use (the primary one). calm and work are both rendered so the page can switch
+    between them without a reload; data-st shows one."""
+    if SET["pet"] not in PETS or not STATE["limits"]:
+        return ""
+    st = pet_state(STATE["limits"], all(a["avail"] for a in STATE["accts"] if a["primary"]), running, now)
+    wk = next((u for k, u, *_ in windows(STATE["limits"], now) if k == "seven_day"), 0)
+    svg = "".join(pet(SET["pet"], x, wk) for x in (("calm", "work") if st in ("calm", "work") else (st,)))
+    return f'<span class="pet" data-st="{st}" role="img" aria-label="{tr("pet." + st)}">{svg}</span>'
+
+
 def acct_block(a, now, lv):
     """A non-primary account in the limits card: week (verdict + daily budget) left, the other windows right."""
     hist, wk, rest = limit_history(acct=a["id"]), "", ""
@@ -2148,7 +2173,7 @@ def acct_block(a, now, lv):
     return f'{acct_head(a, now)}<div>{wk}</div><div>{rest}</div>'
 
 
-def limits_card(week_cost, split=None):
+def limits_card(week_cost, split=None, running=0):
     fresh_limits()
     L, now = STATE["limits"], time.time()
     if not L:
@@ -2224,7 +2249,7 @@ def limits_card(week_cost, split=None):
     accts = STATE["accts"] if len(STATE["accts"]) > 1 else []
     top = "".join(acct_head(a, now) for a in accts if a["primary"])
     rest = "".join(acct_block(a, now, lv) for a in accts if not a["primary"])
-    return (f'<section class="card hero" aria-label="{tr("lim.title")}">{top}<div>{left}</div><div>{right}'
+    return (f'<section class="card hero" aria-label="{tr("lim.title")}">{pet_html(running, now)}{top}<div>{left}</div><div>{right}'
             f'<p class="why">{stamp}</p></div>{spark}{rest}</section>')
 
 
@@ -2501,7 +2526,8 @@ def page_overview(p):
     logged = tr("ov.logged", p=pc(d["logged"] / (d["n_steps"] or 1) * 100))
     push = "" if push_on() else f'<p class="hint pushoff">{tr("ov.push", url="/settings#push")}</p>'
     split = limit_split(limit_history(), d30["hours"], cc_calls(w["since"]), w["since"]) if w["week"] else None
-    body = f"""{limits_card(w["total"] if w["week"] else None, split)}{live_card(live(), p)}{guard_note()}{push}
+    now_live = live()
+    body = f"""{limits_card(w["total"] if w["week"] else None, split, now_live["n"])}{live_card(now_live, p)}{guard_note()}{push}
 <div class="kpis">{kpi_html}</div>
 <div class="grid g2">
 <section class="card"><h2>{tr("ov.eats")}</h2>
@@ -3819,6 +3845,30 @@ def selftest():
         _req.lang = "de"
         assert '<span class="badge next">Als Nächstes</span>' in limits_card(None) and "In Benutzung" in limits_card(None)
         _req.lang, STATE["accts"] = "en", acc0
+        # Mascots: every drawing is valid SVG with its colors in style (var() in fill="" is not safe everywhere)
+        from xml.etree import ElementTree as ET
+        for k in PETS:
+            for st in MOODS:
+                g = pet(k, st, 62)
+                ET.fromstring(g)
+                assert "{" not in g and "var(--" in g and not re.search(r' (fill|stroke)="var', g), (k, st, g)
+        assert pet("bot", "calm", 0).count('opacity="1"') == 4 and pet("bot", "calm", 80).count('opacity="1"') == 1
+        assert 'y="44"' in pet("coffee", "calm", 0) and 'y="98"' in pet("coffee", "tight", 100)   # full / empty mug
+        W = lambda f, w: {"five_hour": {"utilization": f, "resets_at": iso(nw + 3600)}, "seven_day": {"utilization": w, "resets_at": iso(nw + 3.5 * 86400)}}
+        assert pet_state(W(10, 20), True, 0, nw) == "calm" and pet_state(W(10, 20), True, 2, nw) == "work" and pet_state(None, True, 0, nw) == "calm"
+        assert pet_state(W(86, 20), True, 1, nw) == pet_state(W(10, 45), True, 0, nw) == "tight"   # a window >= 85 % / forecast 90 %
+        assert pet_state(W(100, 20), True, 1, nw) == pet_state(W(10, 100), True, 0, nw) == pet_state(W(10, 20), False, 1, nw) == "limit"
+        STATE["limits"] = W(10, 20)
+        c = limits_card(None)
+        assert c.count('<span class="pet" data-st="calm" role="img" aria-label="Mascot: calm') == 1 and 'class="pet-calm"' in c and 'class="pet-work"' in c, c
+        assert 'data-st="work"' in limits_card(None, running=1)
+        STATE["accts"] = [A("w1", "work", STATE["limits"], use=True, primary=True, avail=False), A("p2", "personal", W(1, 1), next=True)]
+        assert 'data-st="limit"' in limits_card(None, running=1) and 'class="pet-work"' not in limits_card(None)   # the account in use is benched
+        STATE["accts"], STATE["limits"] = acc0, W(90, 20)
+        assert 'data-st="tight"' in limits_card(None, running=1) and limits_card(None).count("<svg class=\"pet-") == 1
+        SET["pet"] = "off"
+        assert 'class="pet' not in limits_card(None)
+        SET["pet"] = DEFAULTS["pet"]
         STATE["limits"] = old
         cl = Path(tmp) / "claude" / "projects" / "-x"
         cl.mkdir(parents=True)
@@ -3934,6 +3984,12 @@ def selftest():
         assert 'started by <a href="/s/s?p=7">Test</a>' in pk and "with subagents" not in pk, pk
         assert f"subagents: 1 · {kc}" in pl and 'started by <a href="/s/s?p=7">' in pl, pl
         # Bots & chats: the overview folds the chats out per bot, the list filters by bot and chat, old src= links still work
+        lim0, STATE["limits"] = STATE["limits"], {"seven_day": {"utilization": 10, "resets_at": iso(time.time() + 3.5 * 86400)}}
+        for k in PETS:   # calm renders the calm and the work drawing: their clipPath ids must not clash on the page
+            SET["pet"] = k
+            ids = re.findall(r'\bid="([^"]+)"', po := page_overview("7"))
+            assert 'data-st="calm"' in po and len(ids) == len(set(ids)), (k, sorted(i for i in ids if ids.count(i) > 1))
+        STATE["limits"], SET["pet"] = lim0, DEFAULTS["pet"]
         po, shop = page_overview("7"), link("/sessions", p="7", bot=":telegram", chat="telegram:42:7")
         assert 'class="chats"' in po and f'<a href="{shop}"><span>Shop</span>' in po and ">Robo · Subagents<" in po, po   # one DM: no context
         assert ">Robo · Cron jobs<" in po and link("/sessions", p="7", bot=":cron", chat="cron:Daily report") in po
