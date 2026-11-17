@@ -145,6 +145,20 @@ svg.spark .w{stroke:var(--acc)}svg.spark .fcl{stroke:var(--acc);stroke-dasharray
 @keyframes pet-pkt{to{stroke-dashoffset:-14}}.pet-pkt2{animation:pet-pkt 2s linear infinite}.pet-pkt1{animation:pet-pkt 1s linear infinite}
 @keyframes pet-rise{0%{transform:translateY(4px);opacity:0}40%{opacity:1}100%{transform:translateY(-10px);opacity:0}}.pet-heat,.pet-steam1{animation:pet-rise 1s ease-out infinite}.pet-steam2{animation:pet-rise 2s ease-out infinite}
 @keyframes pet-stir{0%,100%{transform:rotate(-8deg)}50%{transform:rotate(8deg)}}.pet-stir{animation:pet-stir 1s ease-in-out infinite}
+/* mascot picker (look settings): the calm drawings, standing still */
+.picks{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}
+.pick{position:relative;display:block;cursor:pointer;font-weight:400}
+.pick input{position:absolute;opacity:0;pointer-events:none}
+.pick>span{display:flex;flex-direction:column;align-items:center;gap:4px;min-height:44px;padding:10px 4px 8px;border-radius:12px;background:var(--tint);box-shadow:0 0 0 1px var(--line);transition:box-shadow .15s,background-color .15s}
+.pick b{color:var(--mute);font-size:13px;font-weight:500;text-align:center;transition:color .15s}
+.pick:hover b{color:var(--ink)}
+.pick input:checked+span{background:var(--raise);box-shadow:0 0 0 2px var(--acc)}
+.pick input:checked+span b{color:var(--ink)}
+.pick input:focus-visible+span{outline:2px solid var(--acc-ink);outline-offset:2px}
+.pick svg{display:block;width:56px;height:56px;overflow:visible}
+.pick svg,.pick svg *{animation:none!important}
+.pick-off rect{fill:none;stroke:var(--soft);stroke-width:3;stroke-dasharray:7 8;stroke-linecap:round}
+@media (min-width:600px){.picks{grid-template-columns:repeat(6,1fr)}}
 @keyframes pet-charge{0%,49%{opacity:.15}50%,90%{opacity:1}}.pet-charge{animation:pet-charge 2s steps(1) infinite}
 /* disclosure for the longer explanations (limit card, ranked bars) */
 details.more{margin-top:12px}

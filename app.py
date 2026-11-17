@@ -3130,8 +3130,14 @@ def card(k, title, inner, hint=""):
 
 
 def pet_picker():
-    """Mascot picker on the look page, its own issue: returns a card once it exists (its key `pet` already saves with look)."""
-    return ""
+    """Mascot picker on the look page: off + every mascot as a radio tile with its static calm drawing and its name."""
+    off = ('<svg class="pick-off" viewBox="0 0 120 120" aria-hidden="true" focusable="false">'
+           '<rect x="22" y="22" width="76" height="76" rx="18"/></svg>')
+    tiles = [("off", off)] + [(k, pet(k, "calm", 0)) for k in PETS]
+    grid = (f'<div class="picks" role="radiogroup" aria-label="{T("pet")}">' + "".join(
+        f'<label class="pick"><input type="radio" name="pet" value="{k}"{" checked" if k == SET["pet"] else ""}>'
+        f'<span>{svg}<b>{T("pet." + k)}</b></span></label>' for k, svg in tiles) + "</div>")
+    return card("mascot", T("pet"), grid, T("pet.why"))
 
 
 def checks(k, label, items):
@@ -4016,6 +4022,17 @@ def selftest():
         assert urllib.request.urlopen(f"http://127.0.0.1:{srv.server_port}/cc-report.py", timeout=30).read().startswith(b"#!/usr/bin/env python3")
         INGEST_SHOWN["at"] = time.time()
         assert "--token tk --install" in page_settings({"done": ["ingest"]}, "advanced") and "--token TOKEN" in page_settings({}, "advanced")
+        # Mascot picker: saves a valid choice, keeps the old one on junk, six labelled tiles in every language
+        SET["pet"] = "rack"
+        assert post(here, b"section=look&pet=duck&action=save") == 200 and SET["pet"] == "duck"
+        assert post(here, b"section=look&pet=xyz&action=save") == 200 and SET["pet"] == "duck"
+        for lg in LOC:
+            _req.lang = lg
+            pk = page_settings({}, "look")
+            assert pk.count('name="pet"') == 6 and 'name="pet" value="duck" checked' in pk, lg
+            names = [tr("set.pet." + k) for k in ("off", *PETS)]
+            assert len(set(names)) == 6 and all(f"<b>{n}</b>" in pk for n in names), (lg, names)
+        _req.lang, SET["pet"] = "en", DEFAULTS["pet"]
         srv.shutdown()
         LAST_PUSH.update(at=time.time(), ok=False, reply="<x>")
         real_k = real + sum(row_cost("claude-opus-5-5", 10, 4000, 1000, 200, 300))   # plus the subagent of the test chat
