@@ -7,31 +7,32 @@
 A self-hosted dashboard that shows what eats your AI usage. Right now it reads
 [Hermes Agent](https://github.com/NousResearch/hermes-agent) with Anthropic Claude and breaks the cost down into every
 tool, skill, plugin, system prompt part, thinking, background review, cache rebuilds after pauses and cache breaks. On
-top of that it shows your subscription limits (5 hours, week, extra credits) with a forecast, sends alerts to your phone
+top of that it shows your subscription limits (5 hours, week, extra credits, for every Claude account in Hermes' pool) with a
+forecast, sends alerts to your phone
 and gives concrete tips from your own data, with the `hermes` command that applies them.
 
-Pure Python standard library. It reads `~/.hermes/state.db` and `~/.hermes/logs/agent.log*` read-only. No AI involved:
+Pure Python standard library. It reads `~/.hermes/state.db` and `~/.hermes/logs/agent.log*` read-only, those of every Hermes profile too. No AI involved:
 ranking, breakdown, forecast and tips are fixed calculation rules, and no request ever goes to a model.
 
 It works with any Hermes installation. It reads the active plugins and memory provider from `config.yaml`
 (`plugins.enabled`, `memory.provider`) and assigns their parts of the system prompt and of your messages accordingly.
 It also detects SOUL.md, Hermes' own notes and where a session came from (Telegram, Discord, Slack, cron jobs ...).
 
-![Overview: weekly limit with pace and daily budget, 5-hour window, key figures](docs/overview.png)
+![Overview: weekly limit with pace, daily budget and the mascot, 5-hour window, extra credits, a second account below](docs/overview.png)
 
-Try it without Hermes: `python3 app.py --demo` starts it on a month of made-up data.
+Try it without Hermes: `python3 app.py --demo` starts it on a month of made-up data with two accounts.
 
 ## Pages
 
 | Page | Content |
 |---|---|
-| `/` | Limits with pace, daily budget and forecast, key figures with the change against last week, what eats the most, bots & chats (one row per bot, tap to see its topics, channels and threads), models, tips |
+| `/` | Limits per account with pace, daily budget, forecast and a mascot, Right now (agents at work and their model), key figures with the change against last week, what eats the most, bots & chats (one row per bot, tap to see its topics, channels and threads), models, tips |
 | `/history` | Cost per day by the biggest items with markers for Hermes updates and config changes, this week laid over the three before, heatmap by weekday and hour, activity calendar, day-by-day table |
 | `/details` | Every tool, skill, plugin, system prompt part and tool description on its own, cache breaks with their likely cause, the ten most expensive single tool results |
-| `/sessions` | Most expensive sessions with bot · chat and last activity under each title, a chip per bot, a chat filter and search; the cron chip shows cost per run and per week. A session page shows every step, the subagents it started with their cost, and the `hermes --resume <id>` command |
+| `/sessions` | Most expensive sessions with bot · chat, model and last activity under each title, a chip per bot, a chat filter and search; the cron chip shows cost per run and per week. A session page shows every step, the model, the subagents it started with their model and cost, and the `hermes --resume <id>` command |
 | `/projects` | Cost per project, tap one to see its sessions |
 | `/settings` | A short list with one page each: appearance, alerts, notifications, budget guard, advanced |
-| `/api/summary` | Limits, forecast and this limit week's cost as JSON, for widgets |
+| `/api/summary` | Limits, forecast, accounts and this limit week's cost as JSON, for widgets |
 
 Period with `?p=w` (since the last weekly limit reset, default), `?p=1`, `?p=7`, `?p=30` or a custom range like
 `?p=2026-10-01..2026-10-07` (the "Custom" button).
@@ -42,6 +43,20 @@ Light and dark mode follow the system setting. On an iPhone, open it in Safari a
 it like an app.
 
 <img src="docs/phone-dark.png" width="260" alt="Overview on a phone in dark mode, with the tab bar at the bottom">
+
+**Several accounts:** When Hermes' credential pool holds more than one Claude account, each one gets its own block,
+read with its own login. A badge says which one is in use (its usage or request count rose in the last 30 minutes),
+which one Hermes picks next and which one sits at its limit. Alerts run per account, and the budget guard only steps in
+when every account is tight. With one account everything looks as before.
+
+**Right now:** The agents working at this moment with bot · chat, what they are doing, for how long and on which model,
+plus the subagents they started. It refreshes every 5 seconds while the page is open and warns when the Hermes gateway
+is down.
+
+**Mascot:** Beside the big weekly number sits an animated companion: terminal, debug duck, server rack, coffee or bot. It
+follows the 5-hour window (the week if your plan has none) and shows four moods: calm, an agent is working, tight (85 %
+or a tight forecast) and asleep at the limit. Coffee level and bot battery show what is left. It follows light and dark
+mode and stands still with reduced motion. Pick one or turn it off under Settings > Appearance.
 
 ## Languages
 
@@ -95,14 +110,14 @@ of money.
 
 ## Settings
 
-`/settings` is a short list, each row opens its own page: **Appearance** (light, dark or system, language, USD or EUR at
+`/settings` is a short list, each row opens its own page: **Appearance** (light, dark or system, language, mascot, USD or EUR at
 the ECB daily rate, compact or full numbers, default period, limits as used or left, costs as money or as % of the
 week), **Alerts** (every alert on its own with its threshold, quiet hours), **Notifications** (ntfy or Telegram, see
 below), **Budget guard** and **Advanced** (other machines, which Hermes home is read, your own ntfy server, the
 dashboard address). Each page saves only its own values. They go to `data/settings.json`, readable only by its owner;
-environment variables only set the defaults. A form saves only when it was sent from Usagecast's own page. If Hermes has
-profiles (`hermes profile create`), Advanced chooses which one is analysed; the limits stay the same, they belong to
-the account.
+environment variables only set the defaults. A form saves only when it was sent from Usagecast's own page. By default
+Usagecast reads the main Hermes home and every profile (`hermes profile create`) together; Advanced narrows it to one.
+The limits stay the same, they belong to the account.
 
 ## Alerts via ntfy
 
@@ -142,12 +157,12 @@ offers "Add to home screen" in the settings.
 Under `/settings/notify`, the Telegram card picks the Hermes home whose bot to use (token and chat come from its `.env`:
 `TELEGRAM_BOT_TOKEN`, `TELEGRAM_HOME_CHANNEL`) and optionally a topic. Then alerts can go to Telegram (Push via
 Telegram) with an "Open" button, the menu button shows the limits (`W 16% · 5h 68%`), and one pinned message keeps the
-week, the 5-hour window and the agents at work up to date every 10 minutes.
+week, the 5-hour window and the agents at work up to date every 10 minutes. With several accounts, both name the one in use.
 
 ## Widgets (iPhone home screen and Lock Screen)
 
 `widget/usagecast-widget.js` is a [Scriptable](https://scriptable.app) script that shows the weekly limit and the 5-hour
-window. Copy it into a new script in Scriptable, add a small Scriptable widget, pick the script and put your dashboard
+window of the account in use. Copy it into a new script in Scriptable, add a small Scriptable widget, pick the script and put your dashboard
 address into "Parameter". It reads `/api/summary`, so the phone has to reach the dashboard (for example over Tailscale).
 
 The same script works on the Lock Screen (iOS 16 or later): long-press the Lock Screen, tap "Customize", pick the Lock

@@ -7,31 +7,31 @@
 Selbst gehostetes Dashboard, das zeigt, was deine KI-Usage frisst. Im Moment liest es
 [Hermes Agent](https://github.com/NousResearch/hermes-agent) mit Anthropic Claude und schlüsselt die Kosten auf: jedes
 Tool, jeder Skill, jedes Plugin, jeder Teil des Systemprompts, Denken, Hintergrund-Prüfung, Cache-Neuaufbau nach Pausen
-und Cache-Brüche. Dazu kommen die Abo-Limits (5 Stunden, Woche, Extra-Guthaben) mit Prognose, Warnungen aufs Handy und
+und Cache-Brüche. Dazu kommen die Abo-Limits (5 Stunden, Woche, Extra-Guthaben, für jedes Claude-Konto im Pool von Hermes) mit Prognose, Warnungen aufs Handy und
 konkrete Spartipps aus den eigenen Daten, mit dem `hermes`-Befehl, der sie umsetzt.
 
-Nur Python-Standardbibliothek. Es liest `~/.hermes/state.db` und `~/.hermes/logs/agent.log*` nur lesend. Keine KI:
+Nur Python-Standardbibliothek. Es liest `~/.hermes/state.db` und `~/.hermes/logs/agent.log*` nur lesend, auch die jedes Hermes-Profils. Keine KI:
 Rangliste, Aufteilung, Prognose und Spartipps sind feste Rechenregeln, es geht nie eine Anfrage an ein Modell raus.
 
 Läuft mit jeder Hermes-Installation. Welche Plugins und welcher Memory-Anbieter aktiv sind, liest es aus `config.yaml`
 (`plugins.enabled`, `memory.provider`) und ordnet deren Teile im Systemprompt und an den Nachrichten danach zu.
 SOUL.md, Hermes' eigene Hinweise und die Herkunft (Telegram, Discord, Slack, Cron-Jobs ...) erkennt es ebenfalls selbst.
 
-![Übersicht: Wochenlimit mit Tempo und Tagesbudget, 5-Stunden-Fenster, Kennzahlen](docs/overview.png)
+![Übersicht: Wochenlimit mit Tempo, Tagesbudget und Maskottchen, 5-Stunden-Fenster, Extra-Guthaben, darunter ein zweites Konto](docs/overview.png)
 
-Ohne Hermes ausprobieren: `python3 app.py --demo` startet es mit einem Monat erfundener Daten.
+Ohne Hermes ausprobieren: `python3 app.py --demo` startet es mit einem Monat erfundener Daten und zwei Konten.
 
 ## Seiten
 
 | Seite | Inhalt |
 |---|---|
-| `/` | Limits mit Tempo, Tagesbudget und Prognose, Kennzahlen mit Vergleich zur Vorwoche, Rangliste was am meisten frisst, Bots & Chats (eine Zeile pro Bot, antippen zeigt Themen, Kanäle und Threads), Modelle, Spartipps |
+| `/` | Limits pro Konto mit Tempo, Tagesbudget, Prognose und Maskottchen, Gerade jetzt (arbeitende Agenten und ihr Modell), Kennzahlen mit Vergleich zur Vorwoche, Rangliste was am meisten frisst, Bots & Chats (eine Zeile pro Bot, antippen zeigt Themen, Kanäle und Threads), Modelle, Spartipps |
 | `/history` | Kosten pro Tag nach den größten Posten mit Markern für Hermes-Updates und Config-Änderungen, diese Woche über den drei davor, Heatmap nach Wochentag und Uhrzeit, Aktivitätskalender, Tagestabelle |
 | `/details` | Alle Tools, Skills, Plugins, Systemprompt-Teile und Tool-Beschreibungen einzeln, Cache-Brüche mit wahrscheinlicher Ursache, die zehn teuersten einzelnen Tool-Ergebnisse |
-| `/sessions` | Teuerste Sessions mit Bot · Chat und letzter Aktivität unter jedem Titel, einem Chip pro Bot, Chat-Filter und Suche; der Chip Cron-Jobs zeigt Kosten pro Lauf und Woche. Eine Session-Seite zeigt jeden Schritt, die gestarteten Subagenten mit ihren Kosten und den Befehl `hermes --resume <id>` |
+| `/sessions` | Teuerste Sessions mit Bot · Chat, Modell und letzter Aktivität unter jedem Titel, einem Chip pro Bot, Chat-Filter und Suche; der Chip Cron-Jobs zeigt Kosten pro Lauf und Woche. Eine Session-Seite zeigt jeden Schritt, das Modell, die gestarteten Subagenten mit Modell und Kosten und den Befehl `hermes --resume <id>` |
 | `/projects` | Kosten pro Projekt, antippen zeigt die Sessions dazu |
 | `/settings` | Eine kurze Liste mit je einer Seite: Darstellung, Warnungen, Benachrichtigungen, Budget-Wächter, Erweitert |
-| `/api/summary` | Limits, Prognose und Kosten der Limit-Woche als JSON, für Widgets |
+| `/api/summary` | Limits, Prognose, Konten und Kosten der Limit-Woche als JSON, für Widgets |
 
 Zeitraum per `?p=w` (seit dem letzten Reset des Wochenlimits, Standard), `?p=1`, `?p=7`, `?p=30` oder ein eigener
 Zeitraum wie `?p=2026-10-01..2026-10-07` (Knopf „Eigener“).
@@ -42,6 +42,20 @@ Hell und dunkel folgen der Systemeinstellung. Auf dem iPhone in Safari öffnen u
 startet es wie eine App.
 
 <img src="docs/phone-dark.png" width="260" alt="Übersicht auf dem Handy im Dunkelmodus, mit der Tab-Leiste unten">
+
+**Mehrere Konten:** Liegen im Anmelde-Pool von Hermes mehrere Claude-Konten, bekommt jedes einen eigenen Block, gelesen
+mit seiner eigenen Anmeldung. Ein Etikett zeigt, welches gerade in Benutzung ist (Verbrauch oder Anfragen sind in den
+letzten 30 Minuten gestiegen), welches Hermes als Nächstes nimmt und welches am Limit steht. Warnungen laufen pro Konto,
+der Budget-Wächter greift erst, wenn alle Konten knapp sind. Mit einem Konto sieht alles aus wie vorher.
+
+**Gerade jetzt:** Die Agenten, die in diesem Moment arbeiten, mit Bot · Chat, was sie tun, wie lange schon und mit
+welchem Modell, dazu ihre Subagenten. Aktualisiert sich alle 5 Sekunden, solange die Seite offen ist, und warnt, wenn
+das Hermes-Gateway nicht läuft.
+
+**Maskottchen:** Neben der großen Wochenzahl sitzt ein animierter Begleiter: Terminal, Debug-Ente, Server-Rack, Kaffee
+oder Bot. Er folgt dem 5-Stunden-Fenster (ohne eins der Woche) und hat vier Stimmungen: ruhig, ein Agent arbeitet, knapp
+(85 % oder knappe Prognose) und schlafend am Limit. Kaffeestand und Bot-Akku zeigen, was übrig ist. Er folgt hell und
+dunkel und steht still bei reduzierter Bewegung. Auswählen oder ausschalten unter Einstellungen > Darstellung.
 
 ## Sprachen
 
@@ -99,13 +113,14 @@ in Geld auch als Anteil der Woche anzeigen.
 ## Einstellungen
 
 `/settings` ist eine kurze Liste, jede Zeile öffnet ihre eigene Seite: **Darstellung** (hell, dunkel oder System,
-Sprache, USD oder EUR zum Tageskurs der EZB, Zahlen kurz oder voll, Standard-Zeitraum, Limits verbraucht oder übrig,
+Sprache, Maskottchen, USD oder EUR zum Tageskurs der EZB, Zahlen kurz oder voll, Standard-Zeitraum, Limits verbraucht oder übrig,
 Kosten in Geld oder in % der Woche), **Warnungen** (jede einzeln mit Schwelle, Ruhezeiten), **Benachrichtigungen** (ntfy
 oder Telegram, siehe unten), **Budget-Wächter** und **Erweitert** (andere Rechner, welcher Hermes-Ordner gelesen wird,
 eigener ntfy-Server, Dashboard-Adresse). Jede Seite speichert nur ihre eigenen Werte. Sie landen in
 `data/settings.json`, lesbar nur für den Besitzer; Umgebungsvariablen geben nur die Standardwerte vor. Gespeichert wird
-nur, wenn das Formular von Usagecasts eigener Seite kommt. Hat Hermes Profile (`hermes profile create`), wählst du unter
-Erweitert, welches ausgewertet wird; die Limits bleiben gleich, sie gehören zum Konto.
+nur, wenn das Formular von Usagecasts eigener Seite kommt. Standardmäßig liest Usagecast den Haupt-Ordner von
+Hermes und alle Profile (`hermes profile create`) zusammen; unter Erweitert lässt es sich auf eins beschränken. Die
+Limits bleiben gleich, sie gehören zum Konto.
 
 ## Warnungen per ntfy
 
@@ -147,12 +162,13 @@ dem Handy im Vollbild und bietet in den Einstellungen „Zum Home-Bildschirm“ 
 Auf `/settings/notify` wählt die Karte Telegram, welches Hermes den Bot stellt (Token und Chat aus dessen `.env`:
 `TELEGRAM_BOT_TOKEN`, `TELEGRAM_HOME_CHANNEL`), und auf Wunsch ein Thema. Dann gehen Warnungen an Telegram (Push über
 Telegram) mit einem Knopf „Öffnen“, der Menü-Knopf zeigt die Limits (`W 16% · 5h 68%`), und eine angepinnte Nachricht
-hält Woche, 5-Stunden-Fenster und arbeitende Agenten alle 10 Minuten aktuell.
+hält Woche, 5-Stunden-Fenster und arbeitende Agenten alle 10 Minuten aktuell. Bei mehreren Konten nennen beide das
+aktive.
 
 ## Widgets (iPhone, Home- und Sperrbildschirm)
 
 `widget/usagecast-widget.js` ist ein Skript für [Scriptable](https://scriptable.app), das Wochenlimit und
-5-Stunden-Fenster zeigt. In Scriptable ein neues Skript anlegen und den Inhalt einfügen, ein kleines Scriptable-Widget
+5-Stunden-Fenster des aktiven Kontos zeigt. In Scriptable ein neues Skript anlegen und den Inhalt einfügen, ein kleines Scriptable-Widget
 hinzufügen, das Skript wählen und die Dashboard-Adresse als „Parameter“ eintragen. Es liest `/api/summary`, das Handy
 muss das Dashboard also erreichen (zum Beispiel über Tailscale).
 
