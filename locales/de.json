@@ -126,6 +126,7 @@
   "lim.week": "Wochenlimit",
   "lim.unit": " %",
   "lim.unit.left": " % übrig",
+  "acal.of": "{label}: {text}",
   "lim.left": "{p} übrig",
   "lim.full": "Voll. {reset}",
   "lim.young": "Für eine Prognose ist die Woche noch zu jung. {reset}",

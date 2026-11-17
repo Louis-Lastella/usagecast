@@ -126,6 +126,7 @@
   "lim.week": "Weekly limit",
   "lim.unit": "%",
   "lim.unit.left": "% left",
+  "acal.of": "{label}: {text}",
   "lim.left": "{p} left",
   "lim.full": "Full. {reset}",
   "lim.young": "Too early in the week for a forecast. {reset}",

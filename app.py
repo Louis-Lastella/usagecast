@@ -1640,6 +1640,24 @@ def watch(d30, now, sent, k, s=None):
 PRIO = {"free": 3, "seven_day@80": 3, "digest": 2, "chat": 3}   # ntfy priority by alert kind, everything else 4 (high)
 
 
+def alerts_pool(accts, sent, now, hist=limit_history, s=None):
+    """alerts() for the primary account alone, or once per account with limits when several are pooled: tags get the
+    prefix "<id>:" (own slice of `sent`), titles "<label>: ". Same (msgs, new) as alerts()."""
+    if len(accts) < 2:
+        return alerts(STATE["limits"], hist(), sent, now, s)
+    pre = {a["id"]: a["id"] + ":" for a in accts}
+    new = {k: v for k, v in sent.items() if now - v < 8 * 86400 and not k.startswith(tuple(pre.values()))}
+    out = []
+    for a in accts:
+        if not a["limits"]:
+            continue
+        p = pre[a["id"]]
+        m, st = alerts(a["limits"], hist(acct=a["id"]), {k[len(p):]: v for k, v in sent.items() if k.startswith(p)}, now, s)
+        new.update({p + k: v for k, v in st.items()})
+        out += [(p + t, tr("acal.of", label=a["label"] or a["id"], text=ti), *rest) for t, ti, *rest in m]
+    return out, new
+
+
 def check_alerts():
     f = DATA / "alerts.json"
     try:
@@ -1649,12 +1667,13 @@ def check_alerts():
     if not STATE["limits"] or quiet_now(time.time()):  # in quiet hours due alerts wait, nothing is marked as sent
         return
     now = time.time()
-    msgs, new = alerts(STATE["limits"], limit_history(), sent, now)
+    msgs, new = alerts_pool(STATE["accts"], sent, now)
     msgs += [x for x in [digest(now, sent, STATE["limits"])] if x]
     if RATE.get("k") and (SET["alert_chat"] or SET["alert_spike"]):
         msgs += watch(data_for("30"), now, sent, RATE["k"])
     for tag, title, text, *path in msgs:
-        if notify(title, text, PRIO.get(tag.split(":")[0], 4), *path):
+        kind = next((tag[len(a["id"]) + 1:] for a in STATE["accts"] if a["id"] and tag.startswith(a["id"] + ":")), tag)
+        if notify(title, text, PRIO.get(kind.split(":")[0], 4), *path):
             new[tag] = time.time()
     if new != sent:
         DATA.mkdir(parents=True, exist_ok=True)
@@ -2756,10 +2775,21 @@ def guard_plan(L, now, jobs, state, s=None):
     return pause, [j for j in mine if not tight or j not in s["guard_jobs"]]
 
 
+def guard_pool(accts, L, now, jobs, state, s=None):
+    """guard_plan() for the primary's limits L; with several accounts jobs pause only when every available account
+    would pause on its own (the pool rotates to a free one otherwise). Resume stays with the primary."""
+    pause, resume = guard_plan(L, now, jobs, state, s)
+    av = [a for a in accts if a["avail"]] if len(accts) > 1 else []
+    if av:
+        plans = [guard_plan(a["limits"], now, jobs, state, s)[0] for a in av]
+        pause = [j for j in plans[0] if all(j in p for p in plans[1:])]
+    return pause, resume
+
+
 def guard():
     """Budget guard step of the 10-minute loop: pauses or resumes the marked jobs through the hermes CLI."""
     jobs, state = {j["id"]: j for j in cron_list()}, guard_state()
-    pause, resume = guard_plan(STATE["limits"], time.time(), {k: j.get("state") for k, j in jobs.items()}, state)
+    pause, resume = guard_pool(STATE["accts"], STATE["limits"], time.time(), {k: j.get("state") for k, j in jobs.items()}, state)
     held = {j for j in state.get("paused", []) if jobs.get(j, {}).get("state") == "paused"}
     if not pause and not resume and held == set(state.get("paused", [])):
         return
@@ -3821,6 +3851,30 @@ def selftest():
     assert guard_plan(Lg(60, 10, 0.5), tg, held, {"paused": ["a", "b"]}, {**gs, "guard_jobs": ["a"]}) == ([], ["b"])
     assert guard_plan(Lg(60, 10, 0.5), tg, held, {"paused": ["a"]}, {**gs, "guard": False}) == ([], ["a"])
     assert guard_plan(None, tg, held, {"paused": ["a"]}, gs) == ([], []) and guard_plan(Lg(50, 10, 0.5), tg, jobs, {"paused": ["a"]}, gs) == ([], [])
+    # Several accounts: guard pauses only when every available one is tight; alerts per account, tags prefixed, label in the title
+    A = lambda i, lab, L, av=True: {"id": i, "label": lab, "limits": L, "avail": av, "primary": i == "w"}
+    pool = [A("w", "work", Lg(60, 10, 0.5)), A("p", "personal", Lg(60, 10, 0.5))]
+    assert guard_pool(pool, pool[0]["limits"], tg, jobs, {}, gs) == (["a", "b"], [])
+    pool[1]["limits"] = Lg(50, 10, 0.5)
+    assert guard_pool(pool, pool[0]["limits"], tg, jobs, {}, gs) == ([], []), "one account free: no pause"
+    pool[1].update(limits=Lg(50, 10, 0.5), avail=False)
+    pool[0]["limits"] = Lg(60, 10, 0.5)
+    assert guard_pool(pool, pool[0]["limits"], tg, jobs, {}, gs) == (["a", "b"], []), "unavailable account does not count"
+    assert guard_pool(pool[:1], pool[0]["limits"], tg, jobs, {}, gs) == guard_plan(pool[0]["limits"], tg, jobs, {}, gs)
+    Lh = Lg(95, 95, 0.5)
+    pool = [A("w", "work", Lh), A("p", "personal", Lh)]
+    nohist, sa = lambda acct=None: [], {**SET, "alert_steps": True}
+    m, st = alerts_pool(pool, {}, tg, nohist, sa)
+    assert {t[:2] for t, _, _ in m} == {"w:", "p:"} and all(ti.startswith(("work: ", "personal: ")) for _, ti, _ in m), m
+    assert all(k[:2] in ("w:", "p:") for k in st), st
+    assert alerts_pool(pool, {**st, **{t: tg for t, _, _ in m}}, tg + 60, nohist, sa)[0] == []   # the sent store keeps accounts apart
+    m2 = alerts_pool(pool, {t: tg for t, _, _ in m if t[0] == "w"}, tg + 60, nohist, sa)[0]
+    assert {t[:2] for t, _, _ in m2} == {"p:"}, m2
+    pool[0]["limits"] = None
+    assert {t[:2] for t, _, _ in alerts_pool(pool, {}, tg, nohist, sa)[0]} == {"p:"}
+    lim0, STATE["limits"] = STATE["limits"], Lh   # one account: tags and texts as before
+    assert alerts_pool(pool[:1], {}, tg, nohist, sa) == alerts(Lh, [], {}, tg, sa) and alerts(Lh, [], {}, tg, sa)[0]
+    STATE["limits"] = lim0
     # Weekly rhythm: a week that spends half its cost in the first day; the weighted forecast sees through it
     ws0, pat = 50 * 7 * 86400, [10.0] * 24 + [10.0 * 24 / 144] * 144
     hc = {ws0 - 7 * 86400 * i + 3600 * h: c * (1 + 0.1 * i) for i in range(1, 5) for h, c in enumerate(pat)}
