@@ -2796,12 +2796,13 @@ def guard_plan(L, now, jobs, state, s=None):
 
 def guard_pool(accts, L, now, jobs, state, s=None):
     """guard_plan() for the primary's limits L; with several accounts jobs pause only when every available account
-    would pause on its own (the pool rotates to a free one otherwise). Resume stays with the primary."""
+    would pause on its own (the pool rotates to a free one otherwise) and come back as soon as one of them is free."""
     pause, resume = guard_plan(L, now, jobs, state, s)
     av = [a for a in accts if a["avail"]] if len(accts) > 1 else []
     if av:
-        plans = [guard_plan(a["limits"], now, jobs, state, s)[0] for a in av]
-        pause = [j for j in plans[0] if all(j in p for p in plans[1:])]
+        plans = [guard_plan(a["limits"], now, jobs, state, s) for a in av]
+        pause = [j for j in plans[0][0] if all(j in p for p, _ in plans[1:])]
+        resume = list(dict.fromkeys(j for _, r in plans for j in r))
     return pause, resume
 
 
@@ -3894,6 +3895,8 @@ def selftest():
     pool[0]["limits"] = Lg(60, 10, 0.5)
     assert guard_pool(pool, pool[0]["limits"], tg, jobs, {}, gs) == (["a", "b"], []), "unavailable account does not count"
     assert guard_pool(pool[:1], pool[0]["limits"], tg, jobs, {}, gs) == guard_plan(pool[0]["limits"], tg, jobs, {}, gs)
+    pool[1]["avail"] = True   # primary still tight, the other one free again: the guard's paused jobs come back
+    assert guard_pool(pool, pool[0]["limits"], tg, dict(jobs, a="paused"), {"paused": ["a"]}, gs) == ([], ["a"])
     Lh = Lg(95, 95, 0.5)
     pool = [A("w", "work", Lh), A("p", "personal", Lh)]
     nohist, sa = lambda acct=None: [], {**SET, "alert_steps": True}
