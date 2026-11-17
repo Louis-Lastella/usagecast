@@ -148,12 +148,12 @@ svg.spark .w{stroke:var(--acc)}svg.spark .fcl{stroke:var(--acc);stroke-dasharray
 @keyframes pet-charge{0%,49%{opacity:.15}50%,90%{opacity:1}}.pet-charge{animation:pet-charge 2s steps(1) infinite}
 /* disclosure for the longer explanations (limit card, ranked bars) */
 details.more{margin-top:12px}
-details.more>summary,details.bar>summary,details.adv>summary{list-style:none;cursor:pointer}
-details.more>summary::-webkit-details-marker,details.bar>summary::-webkit-details-marker,details.adv>summary::-webkit-details-marker{display:none}
+details.more>summary,details.bar>summary{list-style:none;cursor:pointer}
+details.more>summary::-webkit-details-marker,details.bar>summary::-webkit-details-marker{display:none}
 details.more>summary{display:inline-flex;align-items:center;gap:7px;padding:4px 0;font-size:13px;font-weight:500;color:var(--mute);transition:color .15s}
 details.more>summary:hover{color:var(--ink)}
-details.more>summary::after,details.adv>summary::after,details.bar>summary .row>span:first-child::after{content:"";width:5px;height:5px;border:solid currentColor;border-width:0 1.5px 1.5px 0;transform:translateY(-2px) rotate(45deg);transition:transform .2s var(--ease)}
-details.more[open]>summary::after,details.adv[open]>summary::after,details.bar[open]>summary .row>span:first-child::after{transform:translateY(1px) rotate(-135deg)}
+details.more>summary::after,details.bar>summary .row>span:first-child::after{content:"";width:5px;height:5px;border:solid currentColor;border-width:0 1.5px 1.5px 0;transform:translateY(-2px) rotate(45deg);transition:transform .2s var(--ease)}
+details.more[open]>summary::after,details.bar[open]>summary .row>span:first-child::after{transform:translateY(1px) rotate(-135deg)}
 details.more[open]>:not(summary),details.bar[open]>.why{animation:pop .22s var(--ease)}
 details.more .why{margin-top:8px}
 
@@ -195,7 +195,6 @@ details.bar>.why{padding:2px 0 10px;max-width:62ch}div.bar>.why{margin-top:7px;m
 .tip .fix+.fix{margin-top:4px}
 .tip .gain{align-self:start;font-size:13.5px;font-weight:600;white-space:nowrap;font-variant-numeric:tabular-nums;line-height:1.55}
 .gear{display:none}
-.set h3{margin:22px 0 0;font-size:13px;font-weight:600;color:var(--mute)}.set .card>.hint+h3{margin-top:10px}
 
 /* Tables */
 .scroll{overflow-x:auto;background:var(--card);border-radius:var(--r);box-shadow:0 0 0 1px var(--line),0 1px 2px var(--shc);margin-top:10px}
@@ -260,7 +259,30 @@ aside nav a.end{margin-top:auto}
 .foot a{color:inherit;text-decoration:none}.foot a:hover{color:var(--ink)}
 .pushoff{margin:12px 4px 0}.pushoff a{color:var(--ink)}
 .set .card{scroll-margin-top:16px}
-.set .card>h2+.field{margin-top:12px}
+.set .card>h2+.field{margin-top:12px}.set .card>.field:first-child{border-top:0;padding-top:0}
+/* iOS-style settings: the list of sub-pages (grouped inset rows, hairlines, chevron) and a narrow column */
+.set,.slist,main>.note{max-width:640px}
+.slist{display:block;background:var(--card);border-radius:var(--r);box-shadow:0 0 0 1px var(--line),0 1px 2px var(--shc);overflow:hidden}
+.srow{position:relative;display:flex;align-items:center;gap:12px;min-height:50px;padding:12px 18px;color:var(--ink);text-decoration:none;font-weight:500;transition:background-color .15s}
+.srow+.srow::before{content:"";position:absolute;top:0;left:18px;right:0;border-top:1px solid var(--line)}
+.srow:hover{background:var(--tint)}
+.srow>span:first-child{flex:none}
+.sval{flex:1;min-width:0;color:var(--mute);font-weight:400;font-size:14px;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.srow::after{content:"";flex:none;width:7px;height:7px;margin-right:2px;border:solid var(--faint);border-width:1.5px 1.5px 0 0;transform:rotate(45deg)}
+.back{display:inline-flex;align-items:center;gap:7px;min-height:44px;margin:-12px 0 0 -2px;color:var(--acc-ink);text-decoration:none;font-size:15px}
+.back::before{content:"";width:8px;height:8px;border:solid currentColor;border-width:0 0 1.75px 1.75px;transform:rotate(45deg)}
+.tg .back{display:none}
+/* a choice of several as a checkmark list (radio rows) */
+.chk{position:relative;display:block;min-height:44px;padding:11px 34px 11px 0;border-top:1px solid var(--line);cursor:pointer}
+.card>h2+.checks{margin-top:8px}.chk:first-child{border-top:0}
+.chk input{position:absolute;opacity:0;pointer-events:none}
+.chk span{display:block;font-weight:500}
+.chk small{display:block;margin-top:1px;color:var(--mute);font-size:13px;font-weight:400}
+.chk input:checked+span::after{content:"";position:absolute;right:8px;top:50%;width:6px;height:12px;border:solid var(--acc-ink);border-width:0 2px 2px 0;transform:translateY(-65%) rotate(45deg)}
+.chk input:disabled+span{color:var(--faint);cursor:not-allowed}
+.chk input:focus-visible+span{outline:2px solid var(--acc-ink);outline-offset:2px;border-radius:6px}
+/* rows that only matter for one choice; a browser without :has drops the rule and shows them all */
+.set:has([name=push][value=own]:not(:checked)) .ch-own,.set:has(#guard:not(:checked)) .gjobs{display:none}
 pre.cmd{margin:0 0 14px;padding:11px 14px;border-radius:10px;background:var(--tint);box-shadow:0 0 0 1px var(--line);font:12.5px/1.6 var(--mono);color:var(--ink2);white-space:pre-wrap;overflow-wrap:anywhere}
 .field{display:flex;justify-content:space-between;align-items:center;gap:8px 28px;padding:14px 0;border-top:1px solid var(--line)}
 .field>div:first-child{flex:1 1 260px;min-width:0}
@@ -292,6 +314,7 @@ pre.cmd{margin:0 0 14px;padding:11px 14px;border-radius:10px;background:var(--ti
 .opts input:focus-visible+span{outline:2px solid var(--acc-ink);outline-offset:1px}
 .opts input:disabled+span{opacity:.45;cursor:not-allowed}
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;font:inherit;font-size:14px;font-weight:500;line-height:1.3;padding:8px 15px;border:0;border-radius:9px;background:var(--card);color:var(--ink);box-shadow:0 0 0 1px var(--line2),0 1px 2px var(--shc);cursor:pointer;text-decoration:none;white-space:nowrap;transition:background-color .15s,box-shadow .15s,transform .1s}
+.btn[hidden]{display:none}
 .btn:hover{background:var(--tint)}
 .btn:active{transform:scale(.98)}
 .btn:disabled{opacity:.5;cursor:not-allowed;transform:none}
@@ -302,9 +325,6 @@ pre.cmd{margin:0 0 14px;padding:11px 14px;border-radius:10px;background:var(--ti
 .card .note{margin:4px 0 8px}
 .state{margin:6px 0 10px;font-size:14.5px}.state strong{font-weight:600}
 .steps{margin:6px 0 4px;padding-left:20px}.steps li{margin:2px 0}
-details.adv{border-top:1px solid var(--line)}
-details.adv>summary{display:flex;align-items:center;gap:7px;padding:14px 0;color:var(--mute);font-size:14px;font-weight:500;transition:color .15s}
-details.adv summary:hover{color:var(--ink)}
 .sr{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
 .cmd{-webkit-user-select:all;user-select:all;cursor:text}
 
@@ -328,7 +348,7 @@ aside nav a.end{display:none}
 .btn,.set input:not([type=checkbox]):not([type=radio]),.set select{min-height:44px}
 main{padding:max(22px,calc(env(safe-area-inset-top) + 14px)) 16px calc(92px + env(safe-area-inset-bottom))}
 .save{bottom:calc(60px + env(safe-area-inset-bottom))}
-.field{flex-direction:column;align-items:stretch}.field>div:first-child{flex:none}.ctl{justify-content:flex-start}
+.field{flex-direction:column;align-items:stretch}.field>div:first-child{flex:none}.ctl{justify-content:flex-start}.field.sw{flex-direction:row;align-items:center}.field.sw>div:first-child{flex:1}
 .top{flex-direction:column;align-items:stretch;margin-bottom:20px}
 .periods{justify-content:flex-start;flex-wrap:nowrap;gap:6px}.periods .seg{display:flex;flex:1 1 auto;min-width:0}.periods .seg a{flex:1 1 auto;text-align:center;padding-inline:6px}details.range summary{padding-inline:11px}
 .set input[type=checkbox]{width:46px;height:28px}.set input[type=checkbox]::before{width:24px;height:24px}.set input[type=checkbox]:checked::before{transform:translateX(18px)}

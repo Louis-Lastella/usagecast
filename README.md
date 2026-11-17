@@ -30,7 +30,7 @@ Try it without Hermes: `python3 app.py --demo` starts it on a month of made-up d
 | `/details` | Every tool, skill, plugin, system prompt part and tool description on its own, cache breaks with their likely cause, the ten most expensive single tool results |
 | `/sessions` | Most expensive sessions with bot · chat and last activity under each title, a chip per bot, a chat filter and search; the cron chip shows cost per run and per week. A session page shows every step, the subagents it started with their cost, and the `hermes --resume <id>` command |
 | `/projects` | Cost per project, tap one to see its sessions |
-| `/settings` | Appearance, limits display, alerts and push setup |
+| `/settings` | A short list with one page each: appearance, alerts, notifications, budget guard, advanced |
 | `/api/summary` | Limits, forecast and this limit week's cost as JSON, for widgets |
 
 Period with `?p=w` (since the last weekly limit reset, default), `?p=1`, `?p=7`, `?p=30` or a custom range like
@@ -95,11 +95,14 @@ of money.
 
 ## Settings
 
-`/settings` sets the appearance (light, dark or system, language, USD or EUR at the ECB daily rate, compact or full
-numbers, default period), the limits display (used or left, costs as money or as % of the week) and every alert on its
-own with its threshold and quiet hours. The values go to `data/settings.json`, readable only by its owner; environment
-variables only set the defaults. The form saves only when it was sent from Usagecast's own page. If Hermes has profiles (`hermes profile create`), the settings also choose which one is analysed; the limits stay
-the same, they belong to the account.
+`/settings` is a short list, each row opens its own page: **Appearance** (light, dark or system, language, USD or EUR at
+the ECB daily rate, compact or full numbers, default period, limits as used or left, costs as money or as % of the
+week), **Alerts** (every alert on its own with its threshold, quiet hours), **Notifications** (ntfy or Telegram, see
+below), **Budget guard** and **Advanced** (other machines, which Hermes home is read, your own ntfy server, the
+dashboard address). Each page saves only its own values. They go to `data/settings.json`, readable only by its owner;
+environment variables only set the defaults. A form saves only when it was sent from Usagecast's own page. If Hermes has
+profiles (`hermes profile create`), Advanced chooses which one is analysed; the limits stay the same, they belong to
+the account.
 
 ## Alerts via ntfy
 
@@ -116,14 +119,14 @@ Every 10 minutes the server checks the limits and sends at most one push message
 
 The last two need a few days of limit readings first (they work in % of the week). Tapping them opens the session.
 
-**Budget guard** (off by default): on `/settings` you mark recurring cron jobs that may wait. While the week gets tight
+**Budget guard** (off by default): on `/settings/budget` you mark recurring cron jobs that may wait. While the week gets tight
 (forecast above 100 % from the second day, the week at 90 % or the 5-hour window at 85 %) Usagecast pauses them with
 `hermes cron pause` and resumes them once there is room again, each time with a quiet push. Jobs you paused yourself
 are never touched; the overview says which jobs are held back.
 
 On Sunday evening a quiet digest follows: where the week stands, the biggest item and the change against last week.
 
-**Setup in a minute:** On `/settings`, "Set up push" creates your own random topic on [ntfy.sh](https://ntfy.sh). On
+**Setup in a minute:** On `/settings/notify`, tick "Own topic": "Set up push" creates your own random topic on [ntfy.sh](https://ntfy.sh). On
 Android one button opens the ntfy app with the subscription; on an iPhone you copy the topic and follow the three steps
 shown there. "Send test" shows the server's reply right away. Your own ntfy server with an access token works too, and
 so does Hermes' ntfy channel (`NTFY_HOME_CHANNEL`, `NTFY_SERVER_URL`, `NTFY_TOKEN` in `~/.hermes/.env`).
@@ -136,7 +139,7 @@ address the phone reaches, for example through Tailscale) with BotFather or the 
 `web_app`. Opened there, it uses Telegram's haptics and back button, matches its colours, goes full screen on phones and
 offers "Add to home screen" in the settings.
 
-Under `/settings`, the Telegram card picks the Hermes home whose bot to use (token and chat come from its `.env`:
+Under `/settings/notify`, the Telegram card picks the Hermes home whose bot to use (token and chat come from its `.env`:
 `TELEGRAM_BOT_TOKEN`, `TELEGRAM_HOME_CHANNEL`) and optionally a topic. Then alerts can go to Telegram (Push via
 Telegram) with an "Open" button, the menu button shows the limits (`W 16% · 5h 68%`), and one pinned message keeps the
 week, the 5-hour window and the agents at work up to date every 10 minutes.
@@ -156,7 +159,7 @@ the 5-hour window, the line above the clock "Week 65% · 5h 6%". iOS tints them 
 
 Claude Code on a laptop uses the same limits but writes its transcripts there. `tools/cc-report.py` (standard library,
 Python 3.9 or later) sums its token counts per hour and model and sends only those numbers to the dashboard every 10
-minutes; the limit split then counts them as Claude Code. On `/settings` under "Other machines": create a token, then
+minutes; the limit split then counts them as Claude Code. On `/settings/advanced` under "Other machines": create a token, then
 run the command shown there on the other machine, for example
 
 ```sh

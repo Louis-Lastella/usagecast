@@ -31,8 +31,16 @@ limit number 80/600 (-0.04em) · KPI 26/600. Labels are sentence case, never upp
 - Longer explanations fold away: `details.bar` (ranked bars, the bar is the summary) and `details.more`
   (limit card). The verdict and the daily budget stay visible.
 - Savings tips are one list card, not a card grid. KPIs are one strip with hairline dividers.
-- On/off settings are switches (`.set input[type=checkbox]`), 38x22 px, 46x28 px on phones.
-- Every fold (`details.more`, `details.bar`, `details.adv`) shows the same small chevron after its label, never the
+- Settings work like iOS Settings: `/settings` is one grouped inset list (`.slist`) of `.srow` links, name left, the
+  current state as a muted `.sval` right, then a chevron; rows >= 44 px, hairline separators inset from the left. Each
+  row opens a sub-page `/settings/<section>` with a `‹ Settings` `.back` link above the title (in Telegram its back
+  button instead), cards of `.field` rows with a one-line hint each, all in a 640 px column, save bar at the bottom.
+  Technical details (env names, server config) live on Advanced or in the README, not in the hints.
+- A choice of several that does not fit a segmented control is a `.checks` checkmark list: one radio row per option
+  with an optional muted line, an accent check on the chosen one. Rows that only matter for one choice (the own-topic
+  setup, the guard's job list) hide with CSS `:has()`; without `:has()` they simply show.
+- On/off settings are switches (`.set input[type=checkbox]`), 38x22 px, 46x28 px on phones; a row with only a switch keeps it beside its name on phones (`.field.sw`).
+- Every fold (`details.more`, `details.bar`) shows the same small chevron after its label, never the
   native triangle.
 - A command to copy is a `pre.cmd` block (tinted, mono, wraps, a tap selects all); short commands in text stay `code`.
 - Lists of things with a value (cron jobs, reporting machines) are `.jobs` rows: name left, value right, no bullets.

@@ -121,6 +121,18 @@ URL_RX = r"https?://[^\s\"'<>]+"
 HHMM = r"([01]\d|2[0-3]):[0-5]\d"
 FORMATS = {"tg_thread": r"\d{0,12}", "quiet_from": HHMM, "quiet_to": HHMM, "ntfy_topic": r"[A-Za-z0-9_-]{1,64}", "ntfy_server": URL_RX, "url": f"({URL_RX})?",
            "extra_steps": r"(\d+(\.\d+)?(\s*[,; ]\s*\d+(\.\d+)?)*)?"}
+# Sub-pages of /settings and the keys each one saves: a form changes only its own section, so a checkbox missing from
+# one page never switches off a setting of another. Every key of DEFAULTS is in exactly one section (selftest).
+SECTIONS = {
+    "look": ("theme", "lang", "currency", "numbers", "period", "limit_view", "cost_unit", "pet"),
+    "alerts": ("alert_five", "five_min", "alert_week", "alert_free", "alert_steps", "alert_extra", "extra_steps", "alert_chat", "chat_pct",
+               "alert_spike", "spike_pct", "alert_digest", "quiet", "quiet_from", "quiet_to"),
+    "notify": ("push", "ntfy_topic", "tg_bot", "tg_thread", "tg_menu", "tg_pin"),
+    "budget": ("guard", "guard_jobs"),
+    "advanced": ("ingest_token", "source", "ntfy_server", "ntfy_token", "url"),
+}
+OLD_ANCHORS = {"look": "look", "limits": "look", "alerts": "alerts", "push": "notify", "tg": "notify", "budget": "budget",
+               "machines": "advanced", "src": "advanced"}   # /settings#<card> of the one-page settings -> sub-page
 
 
 def load_settings():
@@ -216,11 +228,12 @@ def source_name():
     return "Hermes" if hs[0][1] == HERMES else tr("src.profile", name=html.escape(hs[0][0]))
 
 
-def clean(form, cur):
-    """Settings from a submitted /settings form: a missing checkbox is off, an invalid value keeps the old one."""
+def clean(form, cur, keys=DEFAULTS):
+    """Settings from a submitted /settings form: a missing checkbox is off, an invalid value keeps the old one.
+    keys: the settings the form holds (a section of SECTIONS); all others stay as they are."""
     s = dict(cur)
-    for k, d in DEFAULTS.items():
-        v = form.get(k, "").strip()
+    for k in keys:
+        d, v = DEFAULTS[k], form.get(k, "").strip()
         if isinstance(d, bool):
             s[k] = k in form
         elif k in CHOICES:
@@ -232,7 +245,7 @@ def clean(form, cur):
                 x = None
             s[k] = min(max(x, RANGES[k][0]), RANGES[k][1]) if x is not None and math.isfinite(x) else s[k]
         elif k == "source":
-            s[k] = v if v in ("", ALL, *profiles()) else s[k]
+            s[k] = v if k in form and v in ("", ALL, *profiles()) else s[k]   # "" is the main home, not a missing field
         elif k == "tg_bot":
             s[k] = v if v in ("off", "hermes", *profiles()) else s[k]
         elif k == "ingest_token":
@@ -2253,8 +2266,8 @@ def limits_card(week_cost, split=None, running=0):
             f'<p class="why">{stamp}</p></div>{spark}{rest}</section>')
 
 
-def layout(title, active, p, h1, sub, body, tabs=True, keep=None):
-    """h1 and sub are already escaped. keep: filters that survive a period switch."""
+def layout(title, active, p, h1, sub, body, tabs=True, keep=None, back=""):
+    """h1 and sub are already escaped. keep: filters that survive a period switch. back: link above the title."""
     nav = "".join(f'<div class="grp">{tr(g)}</div>' + "".join(
         f'<a href="{link(href, p=p)}"{" class=on aria-current=page" if href == active else ""}>'
         f'<svg viewBox="0 0 24 24" aria-hidden="true">{ICONS[href]}</svg>{tr(name)}</a>' for href, name in items) for g, items in NAV)
@@ -2273,7 +2286,7 @@ def layout(title, active, p, h1, sub, body, tabs=True, keep=None):
            f'<button class="btn primary">{tr("range.go")}</button></form></details>')
     seg = f'<div class="periods"><nav class="seg" aria-label="{tr("aria.period")}">{seg}</nav>{rng}</div>' if tabs else ""
     foot = (tr("foot.limits", at=hm(STATE["ok"]) if STATE["ok"] else "–") + "<br>"
-            + f'<a href="/settings#push">{tr("foot.ntfy.on" if push_on() else "foot.ntfy.off")}</a>')
+            + f'<a href="/settings/notify">{tr("foot.ntfy.on" if push_on() else "foot.ntfy.off")}</a>')
     th = SET["theme"]
     metas = "".join(f'<meta name="theme-color" content="{c}"' + (f' media="(prefers-color-scheme: {m})"' if th == "system" else "") + ">"
                     for m, c in (("light", "#f7f6f4"), ("dark", "#141312")) if th in ("system", m))
@@ -2300,7 +2313,7 @@ def layout(title, active, p, h1, sub, body, tabs=True, keep=None):
 {metas}</head>
 <body><div class="app"><aside><a class="brand" href="{link("/", p=p)}"><span class="logo">{LOGO}</span><span>Usagecast</span></a>
 <nav aria-label="{tr("aria.pages")}">{nav}</nav><div class="foot">{foot}</div></aside>
-<main><header class="top"><div><h1>{h1}</h1><p class="sub">{sub}</p></div>{seg}{gear}</header>
+<main><header class="top"><div>{back}<h1>{h1}</h1><p class="sub">{sub}</p></div>{seg}{gear}</header>
 {body}
 <footer class="pf"><nav aria-label="{tr("aria.lang")}">{" · ".join(langs)}</nav><a href="{REPO_URL}">Usagecast {VERSION}</a></footer></main></div></body></html>"""
 
@@ -2524,7 +2537,7 @@ def page_overview(p):
     bots_html = (f'<section class="card"><h2>{tr("ov.bots")}</h2>'
                  f'{bars(sorted(((k, v[0]) for k, v in bots.items()), key=lambda x: -x[1]), tot, ttl, n=20, soft=True, name_of=fold, raw=True)}</section>')
     logged = tr("ov.logged", p=pc(d["logged"] / (d["n_steps"] or 1) * 100))
-    push = "" if push_on() else f'<p class="hint pushoff">{tr("ov.push", url="/settings#push")}</p>'
+    push = "" if push_on() else f'<p class="hint pushoff">{tr("ov.push", url="/settings/notify")}</p>'
     split = limit_split(limit_history(), d30["hours"], cc_calls(w["since"]), w["since"]) if w["week"] else None
     now_live = live()
     body = f"""{limits_card(w["total"] if w["week"] else None, split, now_live["n"])}{live_card(now_live, p)}{guard_note()}{push}
@@ -3107,33 +3120,47 @@ def field(k, name, ctl, why=""):
     why = '<div class="why">' + why + "</div>" if why else ""   # a div: the push steps hold a list
     lab = (f'<label for="{k}" id="{k}-l">{name}</label>' if re.search(rf'<(?:input|select|button)\b[^>]*\bid="{k}"', ctl)
            else f'<span class="fname" id="{k}-l">{name}</span>')
-    return f'<div class="field"><div>{lab}{why}</div><div class="ctl">{ctl}</div></div>'
+    sw = " sw" if re.fullmatch(r'<input type="checkbox"[^<]*>', ctl) else ""   # just a switch: stays beside its name on phones
+    return f'<div class="field{sw}"><div>{lab}{why}</div><div class="ctl">{ctl}</div></div>'
 
 
 def card(k, title, inner, hint=""):
     hint = '<p class="hint">' + hint + "</p>" if hint else ""
-    return f'<section class="card" id="{k}"><h2>{title}</h2>{hint}{inner}</section>'
+    return f'<section class="card" id="{k}">' + (f"<h2>{title}</h2>" if title else "") + f"{hint}{inner}</section>"
 
 
-def page_settings(q):
-    s, done, T = SET, (q.get("done") or [""])[0], lambda k: tr("set." + k)
-    note = ""
-    if done == "test" and time.time() - LAST_PUSH.get("at", 0) < 600:
-        note = tr("set.test.ok" if LAST_PUSH["ok"] else "set.test.fail", reply=f'<code>{e(LAST_PUSH["reply"])}</code>')
-        fail, code = not LAST_PUSH["ok"] and ntfy_target(), LAST_PUSH["reply"][:3]
-        if fail and code in ("401", "403"):
-            note += " " + T("test.auth")
-        elif fail and not code.isdigit():
-            note += " " + T("test.net")
-    elif done in ("save", "setup", "newtopic", "useurl"):
-        note = T("done." + done)
-    note = f'<p class="note" role="status">{note}</p>' if note else ""
-    top, push_note = (note, "") if done == "save" else ("", note)
-    names = {"ntfy_topic": "topic", "ntfy_server": "server.url", "url": "url", "quiet_from": "quiet.from", "quiet_to": "quiet.to",
-             "extra_steps": "a.extra.steps"}
-    bad = [T(names[k]) for k in (q.get("bad") or [""])[0].split(",") if k in names]
-    if bad:
-        top = f'<p class="note" role="alert">{tr("set.bad", fields=", ".join(bad))}</p>'
+def pet_picker():
+    """Mascot picker on the look page, its own issue: returns a card once it exists (its key `pet` already saves with look)."""
+    return ""
+
+
+def checks(k, label, items):
+    """Radio buttons as an iOS checkmark list, one row per choice: items = (value, name, one-line hint, disabled)."""
+    return (f'<div class="checks" role="radiogroup" aria-label="{label}">' + "".join(
+        f'<label class="chk"><input type="radio" name="{k}" value="{v}"{" checked" if v == SET[k] else ""}{" disabled" if off else ""}>'
+        f'<span>{t}' + (f'<small>{why}</small>' if why else "") + '</span></label>' for v, t, why, off in items) + "</div>")
+
+
+def T(k):
+    return tr("set." + k)
+
+
+def settings_list():
+    """/settings: one row per sub-page with its current state, like the iOS Settings app."""
+    s = SET
+    quiet = tr("set.row.quiet", a=s["quiet_from"], b=s["quiet_to"]) if s["quiet"] else T("row.noquiet")
+    vals = {"look": f'{T("theme." + s["theme"])} · {LOC[lang()]["lang.name"]} · {s["currency"]}',
+            "alerts": tr("set.row.alerts", n=sum(s[k] for k in SECTIONS["alerts"] if k.startswith("alert_")), quiet=quiet),
+            "notify": T("via." + s["push"]) if push_on() else T("off"),
+            "budget": tr("set.row.guard", n=len(s["guard_jobs"])) if s["guard"] else T("off"), "advanced": ""}
+    rows = "".join(f'<a class="srow" href="/settings/{k}"><span>{T(TITLES[k])}</span><span class="sval">{v}</span></a>' for k, v in vals.items())
+    old = ",".join(f"{a}:{b}" for a, b in OLD_ANCHORS.items())   # links from before the sub-pages: /settings#push and so on
+    js = (f'<script>var h=location.hash.slice(1);for(const p of "{old}".split(","))'
+          'if(h&&p.split(":")[0]==h)location.replace("/settings/"+p.split(":")[1])</script>')
+    return layout(T("h1") + " · Usagecast", "/settings", s["period"], T("h1"), "", f'<nav class="slist" aria-label="{T("h1")}">{rows}</nav>{js}', tabs=False)
+
+
+def set_look(s, done):
     if FX.get("rate"):
         fx = tr("set.fx", date=when(datetime.fromisoformat(FX["date"]).timestamp(), "day"), rate=nf(FX["rate"], 4))
     else:
@@ -3143,9 +3170,13 @@ def page_settings(q):
             + field("currency", T("currency"), select("currency", [(c, T("currency." + c)) for c in CHOICES["currency"]], s["currency"]), fx)
             + field("numbers", T("numbers"), opts("numbers", [(v, T("numbers." + v)) for v in CHOICES["numbers"]]))
             + field("period", T("period"), select("period", [(k, tr("period." + k)) for k in PERIODS], s["period"]), T("period.why")))
-    limits = field("limit_view", T("view"), opts("limit_view", [(v, T("view." + v)) for v in CHOICES["limit_view"]]), T("view.why"))
-    rate = tr("lim.rate", cost=cash(1 / RATE["k"]), n=RATE["hours"]) if RATE.get("k") else T("cost.none")
-    limits += field("cost_unit", T("cost"), opts("cost_unit", [(v, T("cost." + v)) for v in CHOICES["cost_unit"]]), T("cost.why") + " " + rate)
+    limits = (field("limit_view", T("view"), opts("limit_view", [(v, T("view." + v)) for v in CHOICES["limit_view"]]), T("view.why"))
+              + field("cost_unit", T("cost"), opts("cost_unit", [(v, T("cost." + v)) for v in CHOICES["cost_unit"]]),
+                      T("cost.why" if RATE.get("k") else "cost.none")))
+    return card("look", "", look) + card("limits", T("limits"), limits) + pet_picker()
+
+
+def set_alerts(s, done):
     lo, hi = RANGES["five_min"]
     five = (f'{check("alert_five")}<input type="number" id="five_min" name="five_min" value="{s["five_min"]}" min="{lo}" max="{hi}"'
             f' inputmode="numeric" aria-label="{T("a.five.min")}"><span class="why">{T("min")}</span>')
@@ -3155,13 +3186,62 @@ def page_settings(q):
                        f' inputmode="decimal" aria-label="{T(k)}"><span class="why">{T("pct")}</span>')
     nok = "" if RATE.get("k") else " " + T("a.nok")
     acur = ((STATE["limits"] or {}).get("extra_usage") or {}).get("currency") or ""
+    lim = (field("alert_five", T("a.five"), five, T("a.five.why")) + field("alert_week", T("a.week"), check("alert_week"), T("a.week.why"))
+           + field("alert_free", T("a.free"), check("alert_free"), T("a.free.why"))
+           + field("alert_steps", T("a.steps"), check("alert_steps"), T("a.steps.why")))
+    costs = (field("alert_extra", T("a.extra"), check("alert_extra"), T("a.extra.why"))
+             + field("extra_steps", T("a.extra.steps"), f'<input id="extra_steps" name="extra_steps" value="{e(s["extra_steps"])}"'
+                     f' inputmode="decimal" placeholder="10, 20" spellcheck="false" autocomplete="off"><span class="why">{e(acur)}</span>',
+                     T("a.extra.steps.why"))
+             + field("alert_chat", T("a.chat"), check("alert_chat") + share("chat_pct"), T("a.chat.why") + nok)
+             + field("alert_spike", T("a.spike"), check("alert_spike") + share("spike_pct"), T("a.spike.why") + nok))
+    digest = field("alert_digest", T("a.digest"), check("alert_digest"), T("a.digest.why")) + field("quiet", T("quiet"), quiet, T("quiet.why"))
+    return card("al-limits", T("ag.limits"), lim) + card("al-costs", T("ag.costs"), costs) + card("al-digest", T("ag.digest"), digest)
+
+
+def set_notify(s, done):
+    host = urlparse(s["ntfy_server"]).netloc
+    hermes_ok, tg_ok = hermes_ntfy() is not None, bool(tg_target())
+    bots = [(n or "hermes", e(agent_label(n))) for n, h in [("", HERMES), *((x, HERMES / "profiles" / x) for x in profiles())]
+            if hermes_env("TELEGRAM_BOT_TOKEN", h)]
+    chan = checks("push", T("via"), [("off", T("via.off"), "", False), ("own", T("via.own"), tr("set.via.own.why", server=e(host)), False),
+                           ("hermes", T("via.hermes"), T("via.hermes.why" if hermes_ok else "via.nohermes"), not hermes_ok),
+                           ("telegram", T("via.telegram"), T("via.tg.why" if tg_ok else "via.notg"), not tg_ok)])
+    if not s["ntfy_topic"]:
+        own = field("setup", T("setup"), f'<button class="btn primary" id="setup" name="action" value="setup">{T("setup.btn")}</button>', T("setup.why"))
+    else:
+        android = f'ntfy://{host}/{s["ntfy_topic"]}' + ("" if s["ntfy_server"].startswith("https:") else "?secure=false")
+        steps = "".join(f"<li>{x}</li>" for x in (tr("set.ios.1", url=APP_STORE), T("ios.2"), T("ios.3")))
+        ios = f'{T("ios")}<ol class="steps">{steps}</ol>' + (tr("set.ios.own", server=e(s["ntfy_server"])) if s["ntfy_server"] != "https://ntfy.sh" else "")
+        own = (field("ntfy_topic", T("topic"), f'<input id="ntfy_topic" name="ntfy_topic" value="{e(s["ntfy_topic"])}" class="mono" pattern="[A-Za-z0-9_\\-]+" maxlength="64"'
+                     f' spellcheck="false" autocomplete="off" autocapitalize="off"><button type="button" class="btn" data-done="{T("copied")}"'
+                     f' onclick="{COPY_JS}">{T("copy")}</button>', T("topic.why"))
+               + field("android", T("subscribe"), f'<a class="btn" id="android" href="{e(android)}">{T("android")}</a>', ios)
+               + field("newtopic", T("newtopic"), f'<button class="btn" id="newtopic" name="action" value="newtopic"'
+                       f' data-q="{e(T("newtopic.confirm"))}" onclick="return confirm(this.dataset.q)">{T("newtopic.btn")}</button>', T("newtopic.why")))
+    test = field("test", T("test"), f'<button class="btn" id="test" name="action" value="test">{T("test.btn")}</button>', T("test.why")) if push_on() else ""
+    tgc = (field("tg_bot", T("tg.bot"), select("tg_bot", [("off", T("tg.bot.off")), *bots], s["tg_bot"]), T("tg.bot.why" if bots else "tg.nobot"))
+           + field("tg_thread", T("tg.thread"), f'<input id="tg_thread" name="tg_thread" value="{e(s["tg_thread"])}" inputmode="numeric"'
+                   f' pattern="[0-9]*" maxlength="12" autocomplete="off">', T("tg.thread.why"))
+           + field("tg_menu", T("tg.menu"), check("tg_menu"), T("tg.menu.why")) + field("tg_pin", T("tg.pin"), check("tg_pin"), T("tg.pin.why"))
+           + f'<p><button type="button" class="btn" id="tg-home" hidden>{T("tg.home")}</button></p>')   # static/app.js shows it in Telegram
+    # The own-topic rows show only while "own topic" is ticked (CSS :has, so no JS; without :has they always show)
+    return card("chan", T("via"), chan + f'<div class="ch-own">{own}</div>' + test) + card("tg", T("tg"), tgc, T("tg.hint"))
+
+
+def set_budget(s, done):
     jl, (gc, gdays), held = cron_list(), cron_costs(data_for("30")), guard_state().get("paused", [])
     rows = "".join(f'<div class="job"><input type="checkbox" id="gj_{e(j["id"])}" name="gj_{e(j["id"])}"{" checked" if j["id"] in s["guard_jobs"] else ""}>'
                    f'<label for="gj_{e(j["id"])}">{e(j.get("name") or j["id"])}</label><span class="why">'
                    f'{tr("set.guard.week", cost=money(gc[j.get("name")][1] / gdays * 7)) if j.get("name") in gc else "–"}'
                    f'{" · " + T("guard.held") if j["id"] in held and j.get("state") == "paused" else ""}</span></div>' for j in jl)
-    guard_ = field("guard", T("guard.on"), check("guard"), T("guard.on.why")) + (
-        field("guard_jobs", T("guard.jobs"), "", T("guard.jobs.why")) + f'<div class="jobs">{rows}</div>' if jl else f'<p class="hint">{T("guard.none")}</p>')
+    # The job list shows only while the guard is on (CSS :has, so no JS; without :has it always shows)
+    jobs = (f'<div class="gjobs">{field("guard_jobs", T("guard.jobs"), "", T("guard.jobs.why"))}<div class="jobs">{rows}</div></div>' if jl
+            else f'<p class="hint">{T("guard.none")}</p>')
+    return card("budget", "", field("guard", T("guard.on"), check("guard"), T("guard.on.why")) + jobs)
+
+
+def set_advanced(s, done):
     tk, url = s["ingest_token"], s["url"] or "https://dashboard.example:8443"
     full = done == "ingest" and time.time() - INGEST_SHOWN.get("at", 0) < 600
     if not tk:
@@ -3182,62 +3262,50 @@ def page_settings(q):
     source = (field("source", T("src.label"), select("source", [(ALL, T("src.all")), ("", main), *((x, e(x)) for x in ps)],
                                                      s["source"] if s["source"] in (ALL, *ps) else ""), T("src.why")) if ps
               else field("source", T("src.label"), f'<span class="why">{main}</span>', T("src.none")))
-    alerts_ = (f'<h3>{T("ag.limits")}</h3>' + field("alert_five", T("a.five"), five, T("a.five.why"))
-               + field("alert_week", T("a.week"), check("alert_week"), T("a.week.why"))
-               + field("alert_free", T("a.free"), check("alert_free"), T("a.free.why"))
-               + field("alert_steps", T("a.steps"), check("alert_steps"), T("a.steps.why"))
-               + f'<h3>{T("ag.costs")}</h3>' + field("alert_extra", T("a.extra"), check("alert_extra"), T("a.extra.why"))
-               + field("extra_steps", T("a.extra.steps"), f'<input id="extra_steps" name="extra_steps" value="{e(s["extra_steps"])}"'
-                       f' inputmode="decimal" placeholder="10, 20" spellcheck="false" autocomplete="off"><span class="why">{e(acur)}</span>',
-                       T("a.extra.steps.why"))
-               + field("alert_chat", T("a.chat"), check("alert_chat") + share("chat_pct"), T("a.chat.why") + nok)
-               + field("alert_spike", T("a.spike"), check("alert_spike") + share("spike_pct"), T("a.spike.why") + nok)
-               + f'<h3>{T("ag.digest")}</h3>' + field("alert_digest", T("a.digest"), check("alert_digest"), T("a.digest.why")) + field("quiet", T("quiet"), quiet, T("quiet.why")))
-    host, own = urlparse(s["ntfy_server"]).netloc, s["ntfy_server"] != "https://ntfy.sh"
-    target = push_on()
-    state = (T("push.state.off") if not target else T("push.state.hermes") if s["push"] == "hermes" else T("push.state.tg") if s["push"] == "telegram"
-             else tr("set.push.state.own", server=e(host)))
-    push = f'<p class="state"><strong>{state}</strong></p>{push_note}'
-    if not s["ntfy_topic"]:
-        push += field("setup", T("setup"), f'<button class="btn primary" id="setup" name="action" value="setup">{T("setup.btn")}</button>', T("setup.why"))
-    else:
-        android = f'ntfy://{host}/{s["ntfy_topic"]}' + ("" if s["ntfy_server"].startswith("https:") else "?secure=false")
-        steps = "".join(f"<li>{x}</li>" for x in (tr("set.ios.1", url=APP_STORE), T("ios.2"), T("ios.3")))
-        ios = f'{T("ios")}<ol class="steps">{steps}</ol>' + (tr("set.ios.own", server=e(s["ntfy_server"])) if own else "")
-        own = (field("ntfy_topic", T("topic"), f'<input id="ntfy_topic" name="ntfy_topic" value="{e(s["ntfy_topic"])}" class="mono" pattern="[A-Za-z0-9_\\-]+" maxlength="64"'
-                       f' spellcheck="false" autocomplete="off" autocapitalize="off"><button type="button" class="btn" data-done="{T("copied")}"'
-                       f' onclick="{COPY_JS}">{T("copy")}</button>', T("topic.why"))
-                 + field("android", T("subscribe"), f'<a class="btn" id="android" href="{e(android)}">{T("android")}</a>', ios)
-                 + field("newtopic", T("newtopic"), f'<button class="btn" id="newtopic" name="action" value="newtopic"'
-                         f' data-q="{e(T("newtopic.confirm"))}" onclick="return confirm(this.dataset.q)">{T("newtopic.btn")}</button>', T("newtopic.why")))
-        push += f'<details class="adv"><summary>{T("own")}</summary>{own}</details>' if s["push"] in ("hermes", "telegram") else own   # another channel sends, own topic waits
-    if target:
-        push += field("test", T("test"), f'<button class="btn" id="test" name="action" value="test">{T("test.btn")}</button>', T("test.why"))
-    hermes_ok = hermes_ntfy() is not None
-    push += field("push", T("via"), opts("push", [(v, T("via." + v)) for v in CHOICES["push"]], tuple(k for k, ok in (("hermes", hermes_ok), ("telegram", bool(tg_target()))) if not ok)),
-                  T("via.why" if hermes_ok else "via.nohermes"))
     token = (f'<input type="password" id="ntfy_token" name="ntfy_token" placeholder="{T("token.saved") if s["ntfy_token"] else ""}"'
              f' autocomplete="new-password">' + (f'<label class="why"><input type="checkbox" name="token_clear"> {T("token.clear")}</label>'
                                                  if s["ntfy_token"] else ""))
-    push += (f'<details class="adv"{" open" if own else ""}><summary>{T("server")}</summary>'
-             + field("ntfy_server", T("server.url"), f'<input type="url" id="ntfy_server" name="ntfy_server" value="{e(s["ntfy_server"])}" class="wide">',
-                     T("server.why"))
-             + field("ntfy_token", T("token"), token, T("token.why")) + "</details>")
-    push += field("url", T("url"), f'<input type="url" id="url" name="url" value="{e(s["url"])}" class="wide" placeholder="https://">'
-                  f'<button class="btn" name="action" value="useurl">{T("useurl")}</button>', T("url.why"))
-    bots = [(n or "hermes", e(agent_label(n))) for n, h in [("", HERMES), *((x, HERMES / "profiles" / x) for x in profiles())]
-            if hermes_env("TELEGRAM_BOT_TOKEN", h)]
-    tgc = (field("tg_bot", T("tg.bot"), select("tg_bot", [("off", T("tg.bot.off")), *bots], s["tg_bot"]), T("tg.bot.why"))
-           + field("tg_thread", T("tg.thread"), f'<input id="tg_thread" name="tg_thread" value="{e(s["tg_thread"])}" inputmode="numeric"'
-                   f' pattern="[0-9]*" maxlength="12" autocomplete="off">', T("tg.thread.why"))
-           + field("tg_menu", T("tg.menu"), check("tg_menu"), T("tg.menu.why")) + field("tg_pin", T("tg.pin"), check("tg_pin"), T("tg.pin.why"))
-           + f'<p><button type="button" class="btn" id="tg-home" hidden>{T("tg.home")}</button></p>')   # static/app.js shows it in Telegram
-    body = (f'{top}<form method="post" action="/settings" class="set">'
+    server = (field("ntfy_server", T("server.url"), f'<input type="url" id="ntfy_server" name="ntfy_server" value="{e(s["ntfy_server"])}" class="wide">',
+                    T("server.why")) + field("ntfy_token", T("token"), token, T("token.why")))
+    addr = field("url", T("url"), f'<input type="url" id="url" name="url" value="{e(s["url"])}" class="wide" placeholder="https://">'
+                 f'<button class="btn" name="action" value="useurl">{T("useurl")}</button>', T("url.why"))
+    return (card("machines", T("ing"), machines, T("ing.hint")) + card("src", T("src"), source)
+            + card("server", T("server"), server, T("server.hint")) + card("addr", "", addr))
+
+
+SET_PAGES = {"look": set_look, "alerts": set_alerts, "notify": set_notify, "budget": set_budget, "advanced": set_advanced}
+TITLES = {"look": "look", "alerts": "alerts", "notify": "notify", "budget": "guard", "advanced": "adv"}   # set.<title> keys
+SUBS = {"alerts": "alerts.hint", "notify": "push.hint", "budget": "guard.hint", "advanced": "sub"}
+
+
+def page_settings(q, sec=""):
+    """/settings (the list) or /settings/<sec>: a form that saves only that section's keys (SECTIONS)."""
+    if sec not in SET_PAGES:
+        return settings_list()
+    s, done = SET, (q.get("done") or [""])[0]
+    note = ""
+    if done == "test" and time.time() - LAST_PUSH.get("at", 0) < 600:
+        note = tr("set.test.ok" if LAST_PUSH["ok"] else "set.test.fail", reply=f'<code>{e(LAST_PUSH["reply"])}</code>')
+        fail, code = not LAST_PUSH["ok"] and ntfy_target(), LAST_PUSH["reply"][:3]
+        if fail and code in ("401", "403"):
+            note += " " + T("test.auth")
+        elif fail and not code.isdigit():
+            note += " " + T("test.net")
+    elif done in ("save", "setup", "newtopic", "useurl"):
+        note = T("done." + done)
+    note = f'<p class="note" role="status">{note}</p>' if note else ""
+    names = {"ntfy_topic": "topic", "ntfy_server": "server.url", "url": "url", "quiet_from": "quiet.from", "quiet_to": "quiet.to",
+             "extra_steps": "a.extra.steps", "tg_thread": "tg.thread"}
+    bad = [T(names[k]) for k in (q.get("bad") or [""])[0].split(",") if k in names]
+    if bad:
+        note = f'<p class="note" role="alert">{tr("set.bad", fields=", ".join(bad))}</p>'
+    body = (f'{note}<form method="post" action="/settings" class="set"><input type="hidden" name="section" value="{sec}">'
             '<button class="sr" name="action" value="save" tabindex="-1" aria-hidden="true"></button>'  # Enter in a field = save
-            + card("look", T("look"), look) + card("limits", T("limits"), limits) + card("alerts", T("alerts"), alerts_, T("alerts.hint")) + card("budget", T("guard"), guard_, T("guard.hint")) + card("machines", T("ing"), machines, T("ing.hint"))
-            + card("push", T("push"), push, T("push.hint")) + card("tg", T("tg"), tgc, T("tg.hint")) + card("src", T("src"), source)
+            + SET_PAGES[sec](s, done)
             + f'<div class="save"><button class="btn primary" name="action" value="save">{T("save")}</button></div></form>')
-    return layout(T("h1") + " · Usagecast", "/settings", s["period"], T("h1"), T("sub"), body, tabs=False)
+    back = f'<a class="back" href="/settings">{T("h1")}</a>'   # static/app.js swaps it for Telegram's back button
+    title = T(TITLES[sec])
+    return layout(f"{title} · Usagecast", "/settings", s["period"], title, T(SUBS[sec]) if sec in SUBS else "", body, tabs=False, back=back)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -3278,8 +3346,8 @@ class Handler(BaseHTTPRequestHandler):
                 body = page_sessions(p, q)
             elif path.startswith("/s/"):
                 body = page_session(unquote(path[3:]), p)
-            elif path == "/settings":
-                body = page_settings(q)
+            elif path == "/settings" or path.startswith("/settings/") and path[10:] in SECTIONS:
+                body = page_settings(q, path[10:])
             elif path == "/live":
                 return self.send(live_card(live(), p).encode(), "text/html; charset=utf-8")
             elif path == "/api/summary":
@@ -3298,7 +3366,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send(body.encode(), "text/html; charset=utf-8")
 
     def do_POST(self):
-        """Only /settings: saves the form, then runs the button's action (set up, new topic, test, use this address)."""
+        """Only /settings: saves the form's section, then runs the button's action (set up, new topic, test, use this address)."""
         _req.lang, _req.url = pick_lang("", self.headers), self.path
         n = self.headers.get("Content-Length", "0")
         if urlparse(self.path).path == "/api/ingest":
@@ -3317,9 +3385,10 @@ class Handler(BaseHTTPRequestHandler):
         if not same_origin(self.headers) or not n.isdigit() or int(n) > 65536:
             return self.send_error(403)
         form = {k: v[-1] for k, v in parse_qs(self.rfile.read(int(n)).decode("utf-8", "replace"), keep_blank_values=True).items()}
-        action = form.get("action", "save")
-        s = clean(form, SET)
-        bad = [k for k in FORMATS if form.get(k, "").strip().rstrip("/") not in ("", s[k])]   # clean() kept the old value
+        action, sec = form.get("action", "save"), form.get("section", "")
+        keys = SECTIONS.get(sec, ())   # no or an unknown section: nothing is saved
+        s = clean(form, SET, keys)
+        bad = [k for k in FORMATS if k in keys and form.get(k, "").strip().rstrip("/") not in ("", s[k])]   # clean() kept the old value
         if action == "ingest":
             s["ingest_token"] = secrets.token_urlsafe(24)
             INGEST_SHOWN["at"] = time.time()
@@ -3336,8 +3405,8 @@ class Handler(BaseHTTPRequestHandler):
             ok, reply = send_push(tr("alert.test"), tr("alert.test.text"), 3)
             LAST_PUSH.update(at=time.time(), ok=ok, reply=reply)
         self.send_response(303)
-        self.send_header("Location", f"/settings?done={quote(action)}" + (f"&bad={','.join(bad)}" if bad else "")
-                         + ("" if action == "save" or bad else "#machines" if action == "ingest" else "#push"))
+        self.send_header("Location", ("/settings/" + sec if sec in SECTIONS else "/settings") + f"?done={quote(action)}"
+                         + (f"&bad={','.join(bad)}" if bad else ""))
         self.send_header("Set-Cookie", f"lang={s['lang']}; Path=/; Max-Age=31536000; SameSite=Lax")
         self.send_header("Content-Length", "0")
         self.end_headers()
@@ -3895,17 +3964,38 @@ def selftest():
         srv = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         threading.Thread(target=srv.serve_forever, daemon=True).start()
 
-        def post(origin):
-            req = urllib.request.Request(f"http://127.0.0.1:{srv.server_port}/settings", b"theme=dark&action=save", {"Origin": origin})
+        def post(origin, body=b"section=look&theme=dark&action=save"):
+            req = urllib.request.Request(f"http://127.0.0.1:{srv.server_port}/settings", body, {"Origin": origin})
             try:
                 return urllib.request.urlopen(req, timeout=30).status
             except urllib.error.HTTPError as err:
                 return err.code
         assert post("http://evil.example") == 403 and SET["theme"] == "system"
-        assert post(f"http://127.0.0.1:{srv.server_port}") == 200 and load_settings()["theme"] == "dark"   # 303 to the page
-        r = urllib.request.urlopen(urllib.request.Request(f"http://127.0.0.1:{srv.server_port}/settings", b"quiet_from=25:00&action=save",
+        here = f"http://127.0.0.1:{srv.server_port}"
+        assert post(here) == 200 and load_settings()["theme"] == "dark"   # 303 to the page
+        # Each sub-page saves only its own section: a checkbox missing from its form must not switch off another page's
+        flat = [k for ks in SECTIONS.values() for k in ks]
+        assert sorted(flat) == sorted(DEFAULTS), set(flat) ^ set(DEFAULTS)   # every key in exactly one section
+        every = {"theme": "light", "five_min": "99", "quiet_from": "01:00", "push": "off", "tg_thread": "5", "pet": "duck",
+                 "ntfy_server": "https://x.example", "url": "https://y.example", "extra_steps": "5", "ntfy_topic": "t2"}   # a bit of every page
+        keep = dict(SET)
+        for sec, keys in SECTIONS.items():
+            SET.update({k: True for k, d in DEFAULTS.items() if isinstance(d, bool)}, push="own", guard_jobs=["j"])
+            snap = json.loads(json.dumps(SET))
+            assert post(here, urlencode({**every, "section": sec, "action": "save"}).encode()) == 200, sec
+            moved = {k for k in DEFAULTS if SET[k] != snap[k]}
+            assert moved and moved <= set(keys), (sec, moved)
+            assert urllib.request.urlopen(f"{here}/settings/{sec}?lang=de", timeout=30).status == 200
+        assert post(here, b"theme=dark&action=save") == 200 and SET["theme"] == "light"   # no section: nothing saved
+        try:
+            urllib.request.urlopen(f"{here}/settings/nope", timeout=30)
+            raise AssertionError("/settings/nope")
+        except urllib.error.HTTPError as err:
+            assert err.code == 404
+        SET.clear(); SET.update(keep); save_settings(dict(SET))
+        r = urllib.request.urlopen(urllib.request.Request(f"http://127.0.0.1:{srv.server_port}/settings", b"section=alerts&quiet_from=25:00&action=save",
                                                           {"Origin": f"http://127.0.0.1:{srv.server_port}"}), timeout=30)
-        assert r.url.endswith("bad=quiet_from") and 'role="alert"' in r.read().decode(), r.url
+        assert "/settings/alerts?" in r.url and r.url.endswith("bad=quiet_from") and 'role="alert"' in r.read().decode(), r.url
         def ingest(body, tok):
             req = urllib.request.Request(f"http://127.0.0.1:{srv.server_port}/api/ingest", body, {"Authorization": "Bearer " + tok} if tok else {})
             try:
@@ -3924,7 +4014,7 @@ def selftest():
         assert [round(c, 6) for t, c in cc_calls(0) if t == 7200] == [round(want, 6)], cc_calls(0)
         assert urllib.request.urlopen(f"http://127.0.0.1:{srv.server_port}/cc-report.py", timeout=30).read().startswith(b"#!/usr/bin/env python3")
         INGEST_SHOWN["at"] = time.time()
-        assert "--token tk --install" in page_settings({"done": ["ingest"]}) and "--token TOKEN" in page_settings({})
+        assert "--token tk --install" in page_settings({"done": ["ingest"]}, "advanced") and "--token TOKEN" in page_settings({}, "advanced")
         srv.shutdown()
         LAST_PUSH.update(at=time.time(), ok=False, reply="<x>")
         real_k = real + sum(row_cost("claude-opus-5-5", 10, 4000, 1000, 200, 300))   # plus the subagent of the test chat
@@ -3946,8 +4036,12 @@ def selftest():
         xt = dict(total=1.0, ttl_save=0, comp={"schema": 0.5}, uses={"tool:a": 1}, ctx={}, where={})
         assert [t for _, t, _ in tips(xt, {"tools": {"a": 1, "b": 1}})] == [tr("tip.unused")]
         assert not tips(xt, {"tools": {"a": 1, "b": 1}}, also={"b"}), "b ran this month: not unused"
-        ids = re.findall(r'\bid="([^"]+)"', page_settings({}))
-        assert len(ids) == len(set(ids)), sorted(i for i in ids if ids.count(i) > 1)
+        for sec in ("", *SECTIONS):
+            ids = re.findall(r'\bid="([^"]+)"', page_settings({}, sec))
+            assert len(ids) == len(set(ids)), (sec, sorted(i for i in ids if ids.count(i) > 1))
+        # Links of the one-page settings: the list page sends /settings#push and the like on to their sub-page
+        assert set(OLD_ANCHORS.values()) <= set(SECTIONS) and all(f"{a}:{b}" in page_settings({}) for a, b in OLD_ANCHORS.items())
+        assert "/settings#" not in page_overview("7") and 'href="/settings/notify"' in page_overview("7")
         assert long_line([50_000] * 9) == LONG_CTX and long_line([50_000] * 20) == LONG_CTX   # too few tasks / small tasks
         assert long_line(list(range(10_000, 160_001, 10_000))) == 130_000 and long_line([900_000] * 12) == 2 * LONG_CTX
         _req.lang = "en"
@@ -3973,7 +4067,8 @@ def selftest():
             cp = f"{datetime.now().date() - timedelta(days=1)}..{datetime.now().date()}"
             for page in [*(f(p) for f in (page_overview, page_history, page_details, page_projects) for p in [*PERIODS, cp]),
                          page_sessions("7", {}), page_sessions("7", {"view": ["cron"]}), page_sessions("7", {"proj": ["shop"]}),
-                         page_session("s", "7"), page_settings({"done": ["save"]}), page_settings({"done": ["test"]})]:
+                         page_session("s", "7"), page_settings({}), *(page_settings({"done": [d]}, x) for x in SECTIONS for d in ("save", "test")),
+                         page_settings({"bad": ["quiet_from,url"]}, "alerts")]:
                 text = re.sub(r"<[^>]+>", " ", page)
                 assert not leftover.search(text) and "{" not in text, (code, leftover.search(text), text[:300])
         # Subagents: the chat lists them with their real cost, the subagent links back, the list shows both ways
@@ -4000,7 +4095,7 @@ def selftest():
         ps_ = page_sessions("7", {"src": ["cron"]})
         assert "Daily report" in ps_ and ">Test</a>" not in ps_ and "Daily report" in page_sessions("7", {"view": ["cron"], "bot": [":cron"]})
         assert "Robo · Telegram" in ps and ">Shop</a>" in ps
-    assert "&lt;x&gt;" in page_settings({"done": ["test"]}) and 'data-theme="dark"' in page_settings({})
+    assert "&lt;x&gt;" in page_settings({"done": ["test"]}, "notify") and 'data-theme="dark"' in page_settings({})
     # Extra credits: a drop in the counter starts a new month, steps come once per month and only the highest
     assert extra_months([{"t": i, "extra": v} for i, v in enumerate([None, 1.0, 2.5, 2.5, 0.0, 0.5, 3.0])]) == [[1, 2.5], [4, 3.0]]
     Lx = {"extra_usage": {"is_enabled": True, "used_credits": 2100, "monthly_limit": 2500, "decimal_places": 2, "currency": "EUR"}}

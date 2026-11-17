@@ -39,7 +39,8 @@ function mini(W) {
   if (!at("6.1")) return
   if (location.pathname !== "/") {
     W.BackButton.show()
-    W.BackButton.onClick(() => history.length > 1 ? history.back() : location.assign("/"))
+    const up = document.querySelector("a.back")   // a settings sub-page: back means the settings list, not the last POST
+    W.BackButton.onClick(() => up ? location.assign(up.href) : history.length > 1 ? history.back() : location.assign("/"))
   }
   addEventListener("click", e => {
     if (e.isTrusted && e.target.closest("nav a, a.gear, a.btn, a.job, button, summary, .set input[type=checkbox], .set input[type=radio]"))
