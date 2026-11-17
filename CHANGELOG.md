@@ -2,6 +2,18 @@
 
 Versions follow [Semantic Versioning](https://semver.org).
 
+## 3.6.0 - 2026-11-17
+
+- Several accounts: when Hermes' credential pool holds more than one Claude account, Usagecast reads the limits of each
+  one with its own login and tells which is in use (its usage or request count rose in the last 30 minutes) and which
+  Hermes picks next (fill_first, round_robin, least_used; random has no next pick). Before, the limit series silently
+  jumped to whichever account came first, so forecast, alerts and history mixed accounts.
+- Limits card: one block per account with a badge (in use, next, limit until ...); the active account keeps the full card.
+- Alerts run per account and name it; the budget guard pauses cron jobs only when every available account is tight and
+  resumes them as soon as one is free.
+- Telegram menu button and pin, `/api/summary` (`accounts`) and the widget name the active account. `--demo` has two.
+- One account: everything looks and behaves as before.
+
 ## 3.5.1 - 2026-11-11
 
 - Tips: "Turn off unused tools" now counts every tool the agent ran in the last 30 days, whatever the period shown.
