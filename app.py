@@ -2153,27 +2153,24 @@ def pet_window(L, now):
     return next(((k, *ws[k]) for k in ("five_hour", "seven_day") if k in ws), None)
 
 
-def pet_state(L, avail, running, now):
-    """Mascot mood: limit (a window full or the account not available, both block work) > tight (its window >= 85 %,
-    or the week forecast >= TIGHT when it follows the week) > work (an agent is running) > calm."""
+def pet_state(L, avail, now):
+    """Mascot mood, from the window it follows only: limit (a window full or the account not available, both block
+    work) > tight (>= 85 %, or the week forecast >= TIGHT when it follows the week) > work (>= 50 %) > calm."""
     if not avail or any(u >= 100 for _, u, *_ in windows(L, now)):
         return "limit"
     k, u, f, *_ = pet_window(L, now) or (None, 0, None)
     if u >= 85 or k == "seven_day" and (week_forecast(u, f) or 0) >= TIGHT:
         return "tight"
-    return "work" if running else "calm"
+    return "work" if u >= 50 else "calm"
 
 
-def pet_html(running, now):
-    """The mascot for the account in use (the primary one). calm and work are both rendered so the page can switch
-    between them without a reload; data-st shows one."""
+def pet_html(now):
+    """The mascot for the account in use (the primary one)."""
     if SET["pet"] not in PETS or not STATE["limits"]:
         return ""
-    st = pet_state(STATE["limits"], all(a["avail"] for a in STATE["accts"] if a["primary"]), running, now)
+    st = pet_state(STATE["limits"], all(a["avail"] for a in STATE["accts"] if a["primary"]), now)
     used = (pet_window(STATE["limits"], now) or (None, 0))[1]
-    svg = "".join(pet(SET["pet"], x, used) for x in (("calm", "work") if st in ("calm", "work") else (st,)))
-    alt = "".join(f' data-l{x}="{tr("pet." + x)}"' for x in ("calm", "work")) if st in ("calm", "work") else ""   # app.js swaps the label
-    return f'<span class="pet" data-st="{st}"{alt} role="img" aria-label="{tr("pet." + st)}">{svg}</span>'
+    return f'<span class="pet" data-st="{st}" role="img" aria-label="{tr("pet." + st)}">{pet(SET["pet"], st, used)}</span>'
 
 
 def acct_block(a, now, lv):
@@ -2193,7 +2190,7 @@ def acct_block(a, now, lv):
     return f'{acct_head(a, now)}<div>{wk}</div><div>{rest}</div>'
 
 
-def limits_card(week_cost, split=None, running=0):
+def limits_card(week_cost, split=None):
     fresh_limits()
     L, now = STATE["limits"], time.time()
     if not L:
@@ -2206,7 +2203,7 @@ def limits_card(week_cost, split=None, running=0):
         if key == "seven_day":
             fc = week_forecast(u, frac)
             week = (start, reset, length, u, fc)
-            left = (f'<div class="lbl">{tr("lim.week")}</div><div class="bigrow"><div class="big">{nf(100 - u if lv else u)}<span>{tr("lim.unit.left" if lv else "lim.unit")}</span></div>{pet_html(running, now)}</div>'
+            left = (f'<div class="lbl">{tr("lim.week")}</div><div class="bigrow"><div class="big">{nf(100 - u if lv else u)}<span>{tr("lim.unit.left" if lv else "lim.unit")}</span></div>{pet_html(now)}</div>'
                     f'{meter(u, frac, hot, lv)}<p class="fc">{txt}</p>')
             if u < 100 and reset:
                 left += f'<p class="why">{budget(u, reset, now)}</p>'
@@ -2547,7 +2544,7 @@ def page_overview(p):
     push = "" if push_on() else f'<p class="hint pushoff">{tr("ov.push", url="/settings/notify")}</p>'
     split = limit_split(limit_history(), d30["hours"], cc_calls(w["since"]), w["since"]) if w["week"] else None
     now_live = live()
-    body = f"""{limits_card(w["total"] if w["week"] else None, split, now_live["n"])}{live_card(now_live, p)}{guard_note()}{push}
+    body = f"""{limits_card(w["total"] if w["week"] else None, split)}{live_card(now_live, p)}{guard_note()}{push}
 <div class="kpis">{kpi_html}</div>
 <div class="grid g2">
 <section class="card"><h2>{tr("ov.eats")}</h2>
@@ -3945,19 +3942,21 @@ def selftest():
         assert pet("bot", "calm", 0).count('opacity="1"') == 4 and pet("bot", "calm", 80).count('opacity="1"') == 1
         assert 'y="44"' in pet("coffee", "calm", 0) and 'y="98"' in pet("coffee", "tight", 100)   # full / empty mug
         W = lambda f, w: {"five_hour": {"utilization": f, "resets_at": iso(nw + 3600)}, "seven_day": {"utilization": w, "resets_at": iso(nw + 3.5 * 86400)}}
-        assert pet_state(W(10, 20), True, 0, nw) == "calm" and pet_state(W(10, 20), True, 2, nw) == "work" and pet_state(None, True, 0, nw) == "calm"
-        assert pet_state(W(86, 20), True, 1, nw) == "tight" and pet_state(W(10, 45), True, 0, nw) == "calm"   # follows the 5 h window, not the week forecast
+        assert pet_state(W(0, 20), True, nw) == pet_state(W(49, 20), True, nw) == pet_state(None, True, nw) == "calm" and pet_state(W(50, 20), True, nw) == "work"
+        assert pet_state(W(86, 20), True, nw) == "tight" and pet_state(W(10, 45), True, nw) == "calm"   # follows the 5 h window, not the week forecast
         wonly = {"seven_day": W(0, 45)["seven_day"]}
-        assert pet_state(wonly, True, 0, nw) == "tight" and pet_window(wonly, nw)[:2] == ("seven_day", 45.0) and pet_window(W(30, 70), nw)[:2] == ("five_hour", 30.0)
-        assert pet_state(W(100, 20), True, 1, nw) == pet_state(W(10, 100), True, 0, nw) == pet_state(W(10, 20), False, 1, nw) == "limit"
+        assert pet_state(wonly, True, nw) == "tight" and pet_window(wonly, nw)[:2] == ("seven_day", 45.0) and pet_window(W(30, 70), nw)[:2] == ("five_hour", 30.0)
+        assert pet_state(W(100, 20), True, nw) == pet_state(W(10, 100), True, nw) == pet_state(W(10, 20), False, nw) == "limit"
         STATE["limits"] = W(10, 20)
         c = limits_card(None)
-        assert c.count('<span class="pet" data-st="calm" data-lcalm="Mascot: calm') == 1 and 'data-lwork="Mascot: an agent' in c and 'role="img" aria-label="Mascot: calm' in c and 'class="pet-calm"' in c and 'class="pet-work"' in c, c
-        assert 'data-st="work"' in limits_card(None, running=1)
+        assert c.count('<span class="pet" data-st="calm" role="img" aria-label="Mascot: calm') == 1 and 'class="pet-calm"' in c and 'class="pet-work"' not in c, c
+        STATE["limits"] = W(60, 20)
+        assert 'data-st="work"' in limits_card(None)
+        STATE["limits"] = W(10, 20)
         STATE["accts"] = [A("w1", "work", STATE["limits"], use=True, primary=True, avail=False), A("p2", "personal", W(1, 1), next=True)]
-        assert 'data-st="limit"' in limits_card(None, running=1) and 'class="pet-work"' not in limits_card(None)   # the account in use is benched
+        assert 'data-st="limit"' in limits_card(None) and 'class="pet-work"' not in limits_card(None)   # the account in use is benched
         STATE["accts"], STATE["limits"] = acc0, W(90, 20)
-        assert 'data-st="tight"' in limits_card(None, running=1) and limits_card(None).count("<svg class=\"pet-") == 1
+        assert 'data-st="tight"' in limits_card(None) and limits_card(None).count("<svg class=\"pet-") == 1
         SET["pet"] = "terminal"
         assert "! 90%" in limits_card(None)   # the number is the 5 h window's, not the week's 20 %
         SET["pet"] = "off"

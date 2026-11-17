@@ -122,8 +122,8 @@
   "label.task.why": "Eigene Aufgabe von Hermes neben dem Chat.",
 
   "lim.title": "Dein Claude-Limit",
-  "pet.calm": "Maskottchen: ruhig, gut im Limit",
-  "pet.work": "Maskottchen: ein Agent arbeitet",
+  "pet.calm": "Maskottchen: ruhig, unter der Hälfte des Fensters",
+  "pet.work": "Maskottchen: beschäftigt, Hälfte des Fensters verbraucht",
   "pet.tight": "Maskottchen: das Limit wird knapp",
   "pet.limit": "Maskottchen: am Limit, schläft bis zum Reset",
   "lim.unavailable": "Gerade nicht abrufbar. Die Anzeige braucht Hermes' Anmeldung über ein Claude-Abo (Pro oder Max), mit einem API-Schlüssel gibt es kein Limit.",

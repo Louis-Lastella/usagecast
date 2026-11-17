@@ -54,8 +54,8 @@ plus the subagents they started. It refreshes every 5 seconds while the page is 
 is down.
 
 **Mascot:** Beside the big weekly number sits an animated companion: terminal, debug duck, server rack, coffee or bot. It
-follows the 5-hour window (the week if your plan has none) and shows four moods: calm, an agent is working, tight (85 %
-or a tight forecast) and asleep at the limit. Coffee level and bot battery show what is left. It follows light and dark
+follows the 5-hour window (the week if your plan has none) and shows four moods by how full that window is: calm, busy from 50 %,
+tight from 85 % (or a tight forecast) and asleep at the limit. Coffee level and bot battery show what is left. It follows light and dark
 mode and stands still with reduced motion. Pick one or turn it off under Settings > Appearance.
 
 ## Languages

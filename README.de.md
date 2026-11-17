@@ -53,8 +53,8 @@ welchem Modell, dazu ihre Subagenten. Aktualisiert sich alle 5 Sekunden, solange
 das Hermes-Gateway nicht läuft.
 
 **Maskottchen:** Neben der großen Wochenzahl sitzt ein animierter Begleiter: Terminal, Debug-Ente, Server-Rack, Kaffee
-oder Bot. Er folgt dem 5-Stunden-Fenster (ohne eins der Woche) und hat vier Stimmungen: ruhig, ein Agent arbeitet, knapp
-(85 % oder knappe Prognose) und schlafend am Limit. Kaffeestand und Bot-Akku zeigen, was übrig ist. Er folgt hell und
+oder Bot. Er folgt dem 5-Stunden-Fenster (ohne eins der Woche) und hat vier Stimmungen, je nachdem wie voll das Fenster
+ist: ruhig, beschäftigt ab 50 %, knapp ab 85 % (oder knappe Prognose) und schlafend am Limit. Kaffeestand und Bot-Akku zeigen, was übrig ist. Er folgt hell und
 dunkel und steht still bei reduzierter Bewegung. Auswählen oder ausschalten unter Einstellungen > Darstellung.
 
 ## Sprachen

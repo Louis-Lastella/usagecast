@@ -2,6 +2,11 @@
 
 Versions follow [Semantic Versioning](https://semver.org).
 
+## 3.8.2 - 2026-11-17
+
+- The mascot's mood now comes from its window alone: calm below 50 %, busy from 50 %, tight from 85 %, asleep at the
+  limit. Before, it looked busy whenever an agent was running, even with the 5-hour window at 0 %.
+
 ## 3.8.1 - 2026-11-17
 
 - The mascot follows one window: the 5-hour one on plans that have it, else the week. Its mood, the terminal's warning,

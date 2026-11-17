@@ -122,8 +122,8 @@
   "label.task.why": "A task Hermes runs on its own next to the chat.",
 
   "lim.title": "Your Claude limit",
-  "pet.calm": "Mascot: calm, well within the limit",
-  "pet.work": "Mascot: an agent is working",
+  "pet.calm": "Mascot: calm, under half the window used",
+  "pet.work": "Mascot: busy, half the window used",
   "pet.tight": "Mascot: the limit is getting tight",
   "pet.limit": "Mascot: at the limit, asleep until the reset",
   "lim.unavailable": "Not available right now. This needs Hermes to be signed in with a Claude subscription (Pro or Max). With an API key there is no limit.",
