@@ -422,7 +422,7 @@
   "set.period": "Default period",
   "set.period.why": "Used when you open a page without picking one.",
   "set.pet": "Mascot",
-  "set.pet.why": "Lives in the limits card and shows how the week is going.",
+  "set.pet.why": "Lives in the limits card and follows the 5-hour window, or the week if your plan has none.",
   "set.pet.off": "Off",
   "set.pet.terminal": "Terminal",
   "set.pet.duck": "Debug duck",

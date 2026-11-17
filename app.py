@@ -2147,13 +2147,19 @@ def acct_head(a, now):
     return f'<div class="acct"><span class="who">{e(a["label"] or a["id"])}</span>{tag}</div>'
 
 
+def pet_window(L, now):
+    """The window the mascot follows: the 5-hour one on plans that have it (it is what throttles first), else the week."""
+    ws = {k: w for k, *w in windows(L, now)}
+    return next(((k, *ws[k]) for k in ("five_hour", "seven_day") if k in ws), None)
+
+
 def pet_state(L, avail, running, now):
-    """Mascot mood: limit (a window full or the account not available) > tight (week forecast >= TIGHT or a window
-    >= 85 %) > work (an agent is running) > calm."""
-    ws = windows(L, now)
-    if not avail or any(u >= 100 for _, u, *_ in ws):
+    """Mascot mood: limit (a window full or the account not available, both block work) > tight (its window >= 85 %,
+    or the week forecast >= TIGHT when it follows the week) > work (an agent is running) > calm."""
+    if not avail or any(u >= 100 for _, u, *_ in windows(L, now)):
         return "limit"
-    if any(u >= 85 or k == "seven_day" and (week_forecast(u, f) or 0) >= TIGHT for k, u, f, *_ in ws):
+    k, u, f, *_ = pet_window(L, now) or (None, 0, None)
+    if u >= 85 or k == "seven_day" and (week_forecast(u, f) or 0) >= TIGHT:
         return "tight"
     return "work" if running else "calm"
 
@@ -2164,8 +2170,8 @@ def pet_html(running, now):
     if SET["pet"] not in PETS or not STATE["limits"]:
         return ""
     st = pet_state(STATE["limits"], all(a["avail"] for a in STATE["accts"] if a["primary"]), running, now)
-    wk = next((u for k, u, *_ in windows(STATE["limits"], now) if k == "seven_day"), 0)
-    svg = "".join(pet(SET["pet"], x, wk) for x in (("calm", "work") if st in ("calm", "work") else (st,)))
+    used = (pet_window(STATE["limits"], now) or (None, 0))[1]
+    svg = "".join(pet(SET["pet"], x, used) for x in (("calm", "work") if st in ("calm", "work") else (st,)))
     alt = "".join(f' data-l{x}="{tr("pet." + x)}"' for x in ("calm", "work")) if st in ("calm", "work") else ""   # app.js swaps the label
     return f'<span class="pet" data-st="{st}"{alt} role="img" aria-label="{tr("pet." + st)}">{svg}</span>'
 
@@ -3940,7 +3946,9 @@ def selftest():
         assert 'y="44"' in pet("coffee", "calm", 0) and 'y="98"' in pet("coffee", "tight", 100)   # full / empty mug
         W = lambda f, w: {"five_hour": {"utilization": f, "resets_at": iso(nw + 3600)}, "seven_day": {"utilization": w, "resets_at": iso(nw + 3.5 * 86400)}}
         assert pet_state(W(10, 20), True, 0, nw) == "calm" and pet_state(W(10, 20), True, 2, nw) == "work" and pet_state(None, True, 0, nw) == "calm"
-        assert pet_state(W(86, 20), True, 1, nw) == pet_state(W(10, 45), True, 0, nw) == "tight"   # a window >= 85 % / forecast 90 %
+        assert pet_state(W(86, 20), True, 1, nw) == "tight" and pet_state(W(10, 45), True, 0, nw) == "calm"   # follows the 5 h window, not the week forecast
+        wonly = {"seven_day": W(0, 45)["seven_day"]}
+        assert pet_state(wonly, True, 0, nw) == "tight" and pet_window(wonly, nw)[:2] == ("seven_day", 45.0) and pet_window(W(30, 70), nw)[:2] == ("five_hour", 30.0)
         assert pet_state(W(100, 20), True, 1, nw) == pet_state(W(10, 100), True, 0, nw) == pet_state(W(10, 20), False, 1, nw) == "limit"
         STATE["limits"] = W(10, 20)
         c = limits_card(None)
@@ -3950,6 +3958,8 @@ def selftest():
         assert 'data-st="limit"' in limits_card(None, running=1) and 'class="pet-work"' not in limits_card(None)   # the account in use is benched
         STATE["accts"], STATE["limits"] = acc0, W(90, 20)
         assert 'data-st="tight"' in limits_card(None, running=1) and limits_card(None).count("<svg class=\"pet-") == 1
+        SET["pet"] = "terminal"
+        assert "! 90%" in limits_card(None)   # the number is the 5 h window's, not the week's 20 %
         SET["pet"] = "off"
         assert 'class="pet' not in limits_card(None)
         SET["pet"] = DEFAULTS["pet"]

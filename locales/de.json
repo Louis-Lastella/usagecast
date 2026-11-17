@@ -422,7 +422,7 @@
   "set.period": "Standard-Zeitraum",
   "set.period.why": "Gilt, wenn du eine Seite ohne Auswahl öffnest.",
   "set.pet": "Maskottchen",
-  "set.pet.why": "Wohnt in der Limit-Karte und zeigt, wie die Woche läuft.",
+  "set.pet.why": "Wohnt in der Limit-Karte und folgt dem 5-Stunden-Fenster, ohne eins der Woche.",
   "set.pet.off": "Aus",
   "set.pet.terminal": "Terminal",
   "set.pet.duck": "Debug-Ente",

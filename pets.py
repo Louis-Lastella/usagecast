@@ -120,7 +120,7 @@ def rack(st, w):   # homelab: LCD face + disk LEDs, vent, two fans, network cabl
     return body
 
 
-def coffee(st, w):   # the fill level is what is left of the week
+def coffee(st, w):   # the fill level is what is left of the window
     glass = "M30 40 h52 v42 a16 16 0 0 1 -16 16 h-20 a16 16 0 0 1 -16 -16z"
     level = round(98 - 54 * min(max(100 - w, 0), 100) / 100, 1)   # full = 44, empty = 98 (the bottom of the mug)
     y = {"calm": 70, "work": 72, "tight": 64, "limit": 68}[st]
@@ -140,7 +140,7 @@ def coffee(st, w):   # the fill level is what is left of the week
     return f'{steam}<g{cl(c)}>{mug}</g>' + (sweat(98, 30) if st == "tight" else "")
 
 
-def bot(st, w):   # the chest battery is what is left of the week
+def bot(st, w):   # the chest battery is what is left of the window
     bars = 0 if st == "limit" else min(max(math.ceil((100 - w) / 25), 0), 4)
     cells = "".join(f'<rect{cl("pet-charge" if st == "limit" else "")} style="animation-delay:-{(3-i)*.5:g}s" x="{49+i*6}" y="88" width="4" height="9" rx="1" '
                     f'fill="{ORD if bars == 1 else ACC}" opacity="{1 if i < bars else .15}"/>' for i in range(4))
@@ -179,8 +179,9 @@ def paint(svg):
     return re.sub(r"<\w+[^>]*>", one, svg)
 
 
-def pet(kind, state, week_used):
-    """One mascot as inline SVG. week_used (0-100) sets the coffee level, the bot's battery and the terminal's warning."""
+def pet(kind, state, used):
+    """One mascot as inline SVG. used (0-100, of the window it follows) sets the coffee level, the bot's battery and the
+    terminal's warning."""
     draw = {"terminal": terminal, "duck": duck, "rack": rack, "coffee": coffee, "bot": bot}[kind]
     return (f'<svg class="pet-{state}" viewBox="0 0 120 120" width="64" height="64" aria-hidden="true" focusable="false">'
-            f'{paint(draw(state, week_used or 0))}</svg>')
+            f'{paint(draw(state, used or 0))}</svg>')

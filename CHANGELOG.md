@@ -2,6 +2,12 @@
 
 Versions follow [Semantic Versioning](https://semver.org).
 
+## 3.8.1 - 2026-11-17
+
+- The mascot follows one window: the 5-hour one on plans that have it, else the week. Its mood, the terminal's warning,
+  the coffee level and the bot battery all come from that window, so the number it shows matches its mood. A full
+  window or an unavailable account still puts it to sleep.
+
 ## 3.8.0 - 2026-11-17
 
 - Mascots: an animated companion sits beside the big weekly number (terminal, rubber duck, server rack, coffee or bot). It
