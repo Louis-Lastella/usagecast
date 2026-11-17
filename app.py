@@ -2064,6 +2064,73 @@ def api_summary():
 TIGHT = 85   # forecast % from which the verdict says "Tight": the backtest was 16-47 % off, so 99 % is no "On track"
 
 
+def win_txt(key, u, frac, reset, length, hist, now, lv):
+    """Verdict line under one limit window's meter and whether the meter is hot."""
+    start = reset - length if reset else now
+    if key == "seven_day":
+        fc = week_forecast(u, frac)
+        if u >= 100:
+            txt = tr("lim.full", reset=until(reset))
+        elif fc is None:
+            txt = tr("lim.young", reset=until(reset))
+        elif fc > 100:
+            txt = tr("lim.week.over", full=when(start + (now - start) * 100 / u, "daytime"), reset=until(reset))
+        else:
+            txt = tr("lim.week.tight" if fc >= TIGHT else "lim.week.lands", fc=tr("lim.left", p=pc(100 - fc)) if lv else pc(fc), frac=pc(frac * 100), reset=until(reset))
+        return txt, u >= 80 or (fc or 0) > 100
+    hot = u >= 80
+    if u >= 100:
+        txt = tr("lim.full", reset=until(reset))
+    elif length <= 5 * 3600:
+        r = rate(hist, key, u, start, now) if reset else None
+        fa = now + (100 - u) / r if r else None
+        if fa and fa < reset:
+            txt, hot = tr("lim.five.full_at", left=dur(fa - now), full=hm(fa), reset=until(reset)), hot or fa - now < 1800
+        elif r is not None:
+            at = min(u + r * (reset - now), 100)
+            txt = tr("lim.five.tight" if at >= TIGHT else "lim.five.enough", reset=hm(reset), at=tr("lim.left", p=pc(100 - at)) if lv else pc(at))
+        else:
+            txt = until(reset)
+    else:
+        fc = week_forecast(u, frac)
+        txt = (tr("lim.forecast", fc=pc(fc)) + " " if fc else "") + until(reset)
+    return txt, hot
+
+
+def budget(u, reset, now):
+    # ponytail: even split of what is left; "left today" would need the limit value at midnight
+    return tr("lim.budget", pct=pc((100 - u) / max((reset - now) / 86400, 1)))
+
+
+def acct_head(a, now):
+    """Name of a pooled account and one calm badge: limit (until the full window resets), in use or next."""
+    full = [r for k, u, f, r, n in windows(a["limits"], now) if u >= 100]
+    if full or not a["avail"]:
+        t = max(full) if full and all(full) else None
+        b = ("badge hot", tr("acct.limit", at=hm(t) if t - now < 86400 else when(t, "daytime")) if t else tr("acct.out"))
+    else:
+        b = ("badge", tr("acct.use")) if a["use"] else ("badge next", tr("acct.next")) if a["next"] else None
+    tag = f'<span class="{b[0]}">{b[1]}</span>' if b else ""
+    return f'<div class="acct"><span class="who">{e(a["label"] or a["id"])}</span>{tag}</div>'
+
+
+def acct_block(a, now, lv):
+    """A non-primary account in the limits card: week (verdict + daily budget) left, the other windows right."""
+    hist, wk, rest = limit_history(acct=a["id"]), "", ""
+    for key, u, frac, reset, length in windows(a["limits"], now):
+        txt, hot = win_txt(key, u, frac, reset, length, hist, now, lv)
+        bud = f'<div class="why">{budget(u, reset, now)}</div>' if key == "seven_day" and u < 100 and reset else ""
+        row = (f'<div class="lim"><div class="row"><span>{tr("lim.week" if key == "seven_day" else "win." + key)}</span>'
+               f'<b>{tr("lim.left", p=pc(100 - u)) if lv else pc(u)}</b></div>{meter(u, frac, hot, lv)}<div class="why">{txt}</div>{bud}</div>')
+        if key == "seven_day":
+            wk = row
+        else:
+            rest += row
+    if not a["limits"]:
+        wk = f'<p class="hint">{tr("acct.error", err=e(a["error"] or "?"))}</p>'
+    return f'{acct_head(a, now)}<div>{wk}</div><div>{rest}</div>'
+
+
 def limits_card(week_cost, split=None):
     fresh_limits()
     L, now = STATE["limits"], time.time()
@@ -2073,22 +2140,14 @@ def limits_card(week_cost, split=None):
     lv = SET["limit_view"] == "left"
     for key, u, frac, reset, length in windows(L, now):
         start = reset - length if reset else now
+        txt, hot = win_txt(key, u, frac, reset, length, hist, now, lv)
         if key == "seven_day":
             fc = week_forecast(u, frac)
             week = (start, reset, length, u, fc)
-            if u >= 100:
-                txt = tr("lim.full", reset=until(reset))
-            elif fc is None:
-                txt = tr("lim.young", reset=until(reset))
-            elif fc > 100:
-                txt = tr("lim.week.over", full=when(start + (now - start) * 100 / u, "daytime"), reset=until(reset))
-            else:
-                txt = tr("lim.week.tight" if fc >= TIGHT else "lim.week.lands", fc=tr("lim.left", p=pc(100 - fc)) if lv else pc(fc), frac=pc(frac * 100), reset=until(reset))
             left = (f'<div class="lbl">{tr("lim.week")}</div><div class="big">{nf(100 - u if lv else u)}<span>{tr("lim.unit.left" if lv else "lim.unit")}</span></div>'
-                    f'{meter(u, frac, u >= 80 or (fc or 0) > 100, lv)}<p class="fc">{txt}</p>')
+                    f'{meter(u, frac, hot, lv)}<p class="fc">{txt}</p>')
             if u < 100 and reset:
-                # ponytail: even split of what is left; "left today" would need the limit value at midnight
-                left += f'<p class="why">{tr("lim.budget", pct=pc((100 - u) / max((reset - now) / 86400, 1)))}</p>'
+                left += f'<p class="why">{budget(u, reset, now)}</p>'
             more = ""
             if week_cost is not None:
                 more += f'<p class="why">{tr("lim.weekcost", cost=cash(week_cost))}</p>'
@@ -2109,22 +2168,6 @@ def limits_card(week_cost, split=None):
             if more:
                 left += f'<details class="more"><summary>{tr("lim.more")}</summary>{more}</details>'
             continue
-        hot = u >= 80
-        if u >= 100:
-            txt = tr("lim.full", reset=until(reset))
-        elif length <= 5 * 3600:
-            r = rate(hist, key, u, start, now) if reset else None
-            fa = now + (100 - u) / r if r else None
-            if fa and fa < reset:
-                txt, hot = tr("lim.five.full_at", left=dur(fa - now), full=hm(fa), reset=until(reset)), hot or fa - now < 1800
-            elif r is not None:
-                at = min(u + r * (reset - now), 100)
-                txt = tr("lim.five.tight" if at >= TIGHT else "lim.five.enough", reset=hm(reset), at=tr("lim.left", p=pc(100 - at)) if lv else pc(at))
-            else:
-                txt = until(reset)
-        else:
-            fc = week_forecast(u, frac)
-            txt = (tr("lim.forecast", fc=pc(fc)) + " " if fc else "") + until(reset)
         right += (f'<div class="lim"><div class="row"><span>{tr("win." + key)}</span><b>{tr("lim.left", p=pc(100 - u)) if lv else pc(u)}</b></div>'
                   f'{meter(u, frac, hot, lv)}<div class="why">{txt}</div></div>')
     x = L.get("extra_usage") or {}
@@ -2161,8 +2204,11 @@ def limits_card(week_cost, split=None):
     stamp = tr("lim.stale", at=when(STATE["ok"], "daytime")) if stale else tr("lim.stamp", at=hm(STATE["ok"]))
     if STATUS.get("indicator") not in (None, "none"):
         stamp += "<br>" + tr("lim.status", desc=html.escape(STATUS.get("description", "")), url=STATUS_URL)
-    return (f'<section class="card hero" aria-label="{tr("lim.title")}"><div>{left}</div><div>{right}'
-            f'<p class="why">{stamp}</p></div>{spark}</section>')
+    accts = STATE["accts"] if len(STATE["accts"]) > 1 else []
+    top = "".join(acct_head(a, now) for a in accts if a["primary"])
+    rest = "".join(acct_block(a, now, lv) for a in accts if not a["primary"])
+    return (f'<section class="card hero" aria-label="{tr("lim.title")}">{top}<div>{left}</div><div>{right}'
+            f'<p class="why">{stamp}</p></div>{spark}{rest}</section>')
 
 
 def layout(title, active, p, h1, sub, body, tabs=True, keep=None):
@@ -3730,6 +3776,27 @@ def selftest():
         assert "On track:</strong> about 80%" in limits_card(None)
         STATE["limits"]["seven_day"]["utilization"] = 45
         assert "Tight:</strong> about 90%" in limits_card(None)   # 85-100 % is no longer "On track"
+        # Several accounts: the primary one on top (name, badge, extras), one block per other account; one account = as before
+        one, acc0 = limits_card(None), STATE["accts"]
+        A = lambda i, lab, lim, **k: {"id": i, "label": lab, "use": False, "next": False, "primary": False, "avail": True,
+                                      "status": None, "limits": lim, "error": None, **k}
+        STATE["accts"] = [A("", "", STATE["limits"], next=True, primary=True)]
+        assert limits_card(None) == one and 'class="acct"' not in one and "badge" not in one
+        p2 = {"five_hour": {"utilization": 100, "resets_at": iso(nw + 1800)}, "seven_day": {"utilization": 20, "resets_at": iso(nw + 2 * 86400)}}
+        STATE["accts"] = [A("p2", "personal", p2), A("w1", "work", STATE["limits"], use=True, primary=True),
+                          A("x3", "", None, avail=False, next=True, error="HTTP 500")]
+        m = limits_card(None)
+        assert m.index(">work<") < m.index(">personal<") < m.index(">x3<"), m   # primary first, then pool order
+        assert '<span class="badge">In use</span>' in m and f'<span class="badge hot">Limit until {hm(nw + 1800)}</span>' in m, m
+        assert '<span class="badge hot">Not available</span>' in m and "No reading right now (HTTP 500)." in m, m
+        assert m.count("Extra credits this month") == 1 and m.count(tr("lim.week")) == 2 and m.count("Daily budget") == 2, m
+        assert tr("lim.budget", pct=pc(80 / 2)) in m and "Full. Reset in" in m and m.count('class="acct"') == 3, m
+        STATE["accts"][2].update(avail=True, limits=p2, error=None)
+        assert '<span class="badge next">' not in limits_card(None)   # a full window beats "next"
+        STATE["accts"][2]["limits"] = STATE["limits"]
+        _req.lang = "de"
+        assert '<span class="badge next">Als Nächstes</span>' in limits_card(None) and "In Benutzung" in limits_card(None)
+        _req.lang, STATE["accts"] = "en", acc0
         STATE["limits"] = old
         cl = Path(tmp) / "claude" / "projects" / "-x"
         cl.mkdir(parents=True)
