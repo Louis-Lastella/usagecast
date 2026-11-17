@@ -2058,7 +2058,7 @@ def live_card(L, p):
     head = (tr("live.n", n=L["n"]) + (" · " + tr("live.subs", n=subs) if subs else "")) if L["runs"] else tr("live.none")
     notes = [tr("live.gw.off")] if L["up"] is False else [tr("live.gw.down", names=e(", ".join(L["down"])))] if L["down"] else []
     nxt = ", ".join(f"{e(n or tr('untitled'))} {hm(t)}" for t, n in L["next"])
-    return (f'<section class="card live" id="live" data-p="{e(p)}"><h2>{tr("live.h")}</h2><p class="state">{head}</p>'
+    return (f'<section class="card live" id="live" data-p="{e(p)}" data-n="{L["n"]}"><h2>{tr("live.h")}</h2><p class="state">{head}</p>'
             + (f'<div class="jobs">{"".join(row(r) for r in tops)}</div>' if tops else "")
             + "".join(f'<p class="hint hot">{x}</p>' for x in notes)
             + (f'<p class="hint">{tr("live.next", list=nxt)}</p>' if nxt else "") + "</section>")
@@ -3577,6 +3577,7 @@ def selftest_v4():
         assert L["runs"][0]["cost"] > 0 and L["next"] == []
         card_ = live_card(L, "w")
         assert card_.count('<a class="job') == 2 and 'class="job sub"' in card_ and "{" not in card_
+        assert 'id="live" data-p="w" data-n="1"' in card_
         old_ = dict(SET)
         SET.update(tg_bot="off", push="telegram")
         assert tg_target() is None and send_push("t", "x")[0] is False and push_on() is False
