@@ -1057,10 +1057,13 @@ def all_tips(d):
 _LH, _LH_LOCK = {"key": None, "off": 0, "rows": []}, threading.Lock()
 
 
-def limit_history(days=7):
-    """Rows of data/limits.jsonl newer than `days`. The file only grows, so it is parsed once and later calls read just
-    the lines appended since (a page used to parse all of it up to four times). A shorter file or another first line
-    means it was rewritten: start over."""
+def limit_history(days=7, acct=None):
+    """Rows of data/limits.jsonl newer than `days` for account `acct` (None = the primary one; rows without "a" belong to
+    the primary account). The file only grows, so it is parsed once and later calls read just the lines appended since
+    (a page used to parse all of it up to four times). A shorter file or another first line means it was rewritten:
+    start over."""
+    prim = next((a["id"] for a in STATE["accts"] if a["primary"]), "")
+    acct = prim if acct is None else acct
     cut, f = time.time() - days * 86400, DATA / "limits.jsonl"
     try:
         with _LH_LOCK, open(f, "rb") as fh:
@@ -1077,29 +1080,93 @@ def limit_history(days=7):
                 except ValueError:
                     pass
             _LH["off"] += end
-            return [h for h in _LH["rows"] if h["t"] > cut]
+            return [h for h in _LH["rows"] if h["t"] > cut and h.get("a", prim) == acct]
     except OSError:
         return []
 
 
 # ---------- Background: limits + snapshot ----------
 LIMITS_PY = r'''
-import json, urllib.request
+import json, time, urllib.request
+def usage(tok):
+    req = urllib.request.Request("https://api.anthropic.com/api/oauth/usage", headers={
+        "Authorization": "Bearer " + (tok or ""), "Accept": "application/json",
+        "anthropic-beta": "oauth-2025-04-20", "User-Agent": "claude-code/2.1.0"})
+    return json.loads(urllib.request.urlopen(req, timeout=20).read().decode())
+try:   # every OAuth account of Hermes' credential pool, each with its own token
+    from agent.credential_pool import load_pool, get_pool_strategy
+    pool = load_pool("anthropic")
+    es = sorted((e for e in pool.entries() if e.auth_type == "oauth"), key=lambda e: e.priority)
+except Exception:
+    es = []
+if not es:
+    try:
+        from agent.anthropic_credentials import resolve_anthropic_token
+    except ImportError:  # Hermes before October 2026
+        from agent.anthropic_adapter import resolve_anthropic_token
+    print(json.dumps({"strategy": "", "accounts": [{"id": "", "label": "", "priority": 0, "requests": 0, "status": None,
+                                                    "avail": True, "usage": usage(resolve_anthropic_token())}]}))
+    raise SystemExit
 try:
-    from agent.anthropic_credentials import resolve_anthropic_token
-except ImportError:  # Hermes before October 2026
-    from agent.anthropic_adapter import resolve_anthropic_token
-req = urllib.request.Request("https://api.anthropic.com/api/oauth/usage", headers={
-    "Authorization": "Bearer " + (resolve_anthropic_token() or ""), "Accept": "application/json",
-    "anthropic-beta": "oauth-2025-04-20", "User-Agent": "claude-code/2.1.0"})
-print(urllib.request.urlopen(req, timeout=20).read().decode())
+    from hermes_cli.config import load_config_readonly
+    m = load_config_readonly().get("model")
+    model = m.get("default") if isinstance(m, dict) else m
+except Exception:
+    model = None
+try:
+    ok = {e.id for e in pool._available_entries(clear_expired=False, refresh=False, model=model)[0]}
+except Exception:   # private API moved: treat all as available
+    ok = {e.id for e in es}
+out = []
+for e in es:
+    a = {"id": e.id, "label": e.label, "priority": e.priority, "requests": e.request_count, "status": e.last_status,
+         "avail": e.id in ok}
+    try:
+        if e.expires_at_ms and e.expires_at_ms < (time.time() + 120) * 1000:   # idle token ran out: Hermes' locked refresh
+            e = pool.try_refresh_matching(credential_id=e.id)
+            if e is None:
+                raise RuntimeError("refresh failed")
+        a["usage"] = usage(e.access_token)
+    except Exception as x:   # never the message: it could quote a token
+        a["error"] = "HTTP %s" % x.code if hasattr(x, "code") else type(x).__name__
+    out.append(a)
+print(json.dumps({"strategy": get_pool_strategy("anthropic"), "accounts": out}))
 '''
-STATE = {"limits": None, "at": 0.0, "ok": 0.0}  # at = last attempt, ok = last successful fetch
+STATE = {"limits": None, "at": 0.0, "ok": 0.0, "accts": []}  # at = last attempt, ok = last successful fetch (primary account)
 LIMITS_LOCK = threading.Lock()
 
 
+def pick(accts, prev, strategy, now):
+    """Which pooled account is in use. Hermes keeps its current pick in memory only, so: `use` = 5 h %, week % or request
+    count rose since the previous reading (in use for 30 min after), `next` = the account Hermes would pick next,
+    `primary` = the one to show. prev/returned state: {id: {"5h", "7d", "n", "used_at"}} (data/accounts.json)."""
+    state, out = {}, []
+    for a in accts:
+        u, p = a.get("usage") or {}, prev.get(a["id"]) or {}
+        cur = {"5h": (u.get("five_hour") or {}).get("utilization"), "7d": (u.get("seven_day") or {}).get("utilization"),
+               "n": a.get("requests")}
+        used = p.get("used_at") or 0
+        if any(v is not None and p.get(k) is not None and v > p[k] for k, v in cur.items()):
+            used = now
+        state[a["id"]] = {**{k: p.get(k) if v is None else v for k, v in cur.items()}, "used_at": used}
+        out.append({"id": a["id"], "use": bool(used) and now - used < 1800, "next": False, "primary": False, "_t": used})
+    av = sorted((a.get("priority") or 0, i) for i, a in enumerate(accts) if a.get("avail"))
+    if strategy == "least_used":
+        av.sort(key=lambda x: accts[x[1]].get("requests") or 0)   # stable: ties by priority
+    if av and strategy != "random":   # random: no way to tell
+        out[av[0][1]]["next"] = True
+    busy = sorted((o for o in out if o["use"]), key=lambda o: -o["_t"])
+    nxt = [o for o in out if o["next"]]
+    top = next((o for o in busy if o["next"]), None) or (busy or nxt or out)[0]
+    for o in out:
+        o["primary"] = o is top
+        del o["_t"]
+    return out, state
+
+
 def refresh_limits(max_age):
-    """Fetch the subscription limits through Hermes' OAuth login (the token stays in the Hermes process) and log them."""
+    """Fetch the subscription limits of every pooled account through Hermes' OAuth login (tokens stay in the Hermes
+    process), find the one in use and log them."""
     with LIMITS_LOCK:
         if time.time() - STATE["at"] < max_age:
             return
@@ -1108,20 +1175,41 @@ def refresh_limits(max_age):
             r = subprocess.run([str(HERMES_PY), "-c", LIMITS_PY], cwd=HERMES / "hermes-agent",
                                capture_output=True, text=True, timeout=40)
             data = json.loads(r.stdout)
-        except (OSError, ValueError, subprocess.TimeoutExpired):
+            accts = data["accounts"]
+            if not accts:
+                raise ValueError("no accounts")
+        except (OSError, ValueError, KeyError, TypeError, subprocess.TimeoutExpired):
             print("limits: not available:", (r.stderr.strip().splitlines() or [""])[-1] if r else "", flush=True)
             STATE["at"] = time.time() - max(max_age - 60, 0)  # try again in a minute
             return
-        STATE.update(limits=data, at=time.time(), ok=time.time())
-        row = {"t": round(time.time())}
-        for k in ("five_hour", "seven_day"):
-            row[k] = (data.get(k) or {}).get("utilization")
-        x = data.get("extra_usage") or {}
-        if x.get("is_enabled") and x.get("used_credits") is not None:
-            row["extra"] = round(x["used_credits"] / 10 ** (x.get("decimal_places") or 0), 2)
+        now, f = time.time(), DATA / "accounts.json"
+        try:
+            prev = json.loads(f.read_text())
+        except (OSError, ValueError):
+            prev = {}
+        flags, keep = pick(accts, prev, data.get("strategy") or "", now)
         DATA.mkdir(parents=True, exist_ok=True)
-        with open(DATA / "limits.jsonl", "a") as f:
-            f.write(json.dumps(row) + "\n")
+        f.with_suffix(".tmp").write_text(json.dumps(keep))
+        f.with_suffix(".tmp").replace(f)
+        STATE["accts"] = [{**o, "label": a.get("label") or "", "avail": a.get("avail"), "status": a.get("status"),
+                           "limits": a.get("usage"), "error": a.get("error")} for o, a in zip(flags, accts)]
+        top = next(a for a in STATE["accts"] if a["primary"])
+        if top["limits"]:
+            STATE.update(limits=top["limits"], ok=now)
+        else:
+            print("limits: not available:", top["error"], flush=True)
+        STATE["at"] = now
+        with open(DATA / "limits.jsonl", "a") as fh:
+            for a in STATE["accts"]:
+                if not a["limits"]:
+                    continue
+                row = {"t": round(now), **({"a": a["id"]} if a["id"] else {})}
+                for k in ("five_hour", "seven_day"):
+                    row[k] = (a["limits"].get(k) or {}).get("utilization")
+                x = a["limits"].get("extra_usage") or {}
+                if x.get("is_enabled") and x.get("used_credits") is not None:
+                    row["extra"] = round(x["used_credits"] / 10 ** (x.get("decimal_places") or 0), 2)
+                fh.write(json.dumps(row) + "\n")
 
 
 def fresh_limits():
@@ -3524,6 +3612,51 @@ def selftest():
         assert [h["seven_day"] for h in limit_history()][-1] == 61 and len(limit_history()) == 4
         (DATA / "limits.jsonl").write_text(json.dumps({"t": nw, "seven_day": 1}) + "\n")
         assert [h["seven_day"] for h in limit_history()] == [1]   # rewritten: start over
+        (DATA / "limits.jsonl").unlink()
+        # Several accounts: pick() per strategy, restart via data/accounts.json, one log row per account, history per account
+        U = lambda h, w: {"five_hour": {"utilization": h}, "seven_day": {"utilization": w}}
+        ac = [{"id": "w1", "label": "work", "priority": 0, "requests": 5, "avail": True, "usage": U(10, 20)},
+              {"id": "p2", "label": "personal", "priority": 1, "requests": 2, "avail": True, "usage": U(0, 0)}]
+        fl = lambda r: [(o["id"], o["use"], o["next"], o["primary"]) for o in r[0]]
+        first = [("w1", False, True, True), ("p2", False, False, False)]   # first reading ever: nothing in use
+        assert fl(pick(ac, {}, "fill_first", nw)) == first and fl(pick(ac, {}, "round_robin", nw)) == first
+        assert fl(pick(ac, {}, "least_used", nw)) == [("w1", False, False, False), ("p2", False, True, True)]
+        assert fl(pick(ac, {}, "random", nw)) == [("w1", False, False, True), ("p2", False, False, False)]
+        r = pick([dict(ac[0], avail=False), ac[1]], {}, "fill_first", nw)
+        assert fl(r) == [("w1", False, False, False), ("p2", False, True, True)]   # exhausted: the next one
+        r = pick(ac, pick(ac, {}, "fill_first", nw)[1], "fill_first", nw + 600)
+        assert not any(o["use"] for o in r[0])   # nothing rose
+        r = pick([ac[0], dict(ac[1], requests=3)], r[1], "fill_first", nw + 600)
+        assert fl(r) == [("w1", False, True, False), ("p2", True, False, True)]   # in use beats next
+        assert pick(ac, r[1], "fill_first", nw + 2399)[0][1]["primary"] and pick(ac, r[1], "fill_first", nw + 2401)[0][0]["primary"]
+        both = {"w1": {"5h": 10, "7d": 20, "n": 5, "used_at": nw - 100}, "p2": {"5h": 0, "7d": 0, "n": 2, "used_at": nw - 50}}
+        assert pick(ac, both, "fill_first", nw)[0][0]["primary"]   # both in use: the one that is also next
+        assert pick(ac, both, "random", nw)[0][1]["primary"]       # else the most recently risen
+        r = pick([{"id": "", "avail": True, "usage": U(5, 5)}], {}, "", nw)
+        assert fl(r) == [("", False, True, True)] and r[1][""]["7d"] == 5   # single account
+        st0, run0, feed = dict(STATE), subprocess.run, {"strategy": "fill_first", "accounts": ac}
+        subprocess.run = lambda *a, **k: subprocess.CompletedProcess(a, 0, json.dumps(feed), "")
+        try:
+            refresh_limits(0)
+            assert STATE["limits"] == U(10, 20) and [a["primary"] for a in STATE["accts"]] == [True, False]
+            assert json.loads((DATA / "accounts.json").read_text())["p2"]["7d"] == 0
+            STATE.update(limits=None, accts=[])   # restart: only accounts.json remembers
+            ac[1]["usage"] = U(3, 1)
+            refresh_limits(0)
+            assert STATE["limits"] == U(3, 1) and [a["use"] for a in STATE["accts"]] == [False, True], STATE["accts"]
+            with open(DATA / "limits.jsonl", "a") as fh:
+                fh.write(json.dumps({"t": nw, "seven_day": 2}) + "\n")   # rows without "a" belong to the primary account
+            assert [h["seven_day"] for h in limit_history()] == [0, 1, 2] and [h["seven_day"] for h in limit_history(acct="w1")] == [20, 20]
+            ok0, ac[1] = STATE["ok"], {"id": "p2", "label": "personal", "priority": 1, "requests": 9, "avail": True, "error": "HTTP 500"}
+            refresh_limits(0)
+            assert STATE["ok"] == ok0 and STATE["limits"] == U(3, 1) and STATE["accts"][1]["error"] == "HTTP 500"
+            feed = {"strategy": "", "accounts": [{"id": "", "avail": True, "usage": U(7, 8)}]}
+            refresh_limits(0)
+            assert STATE["limits"] == U(7, 8) and "\"a\"" not in (DATA / "limits.jsonl").read_text().splitlines()[-1]
+            assert [h["seven_day"] for h in limit_history()] == [2, 8]   # single account: untagged rows only
+        finally:
+            subprocess.run = run0
+            STATE.clear(); STATE.update(st0)
         (DATA / "limits.jsonl").unlink()
         assert c.count('class="fcl"') == 1 and c.count('class="cap"') == 1 and "Reset " in c, c   # trend: this week, 100 % line, forecast
         assert "runs ~20% over, about $" in c and "Extra credits this month" in c, c
