@@ -558,6 +558,8 @@
   "set.save": "Save",
   "set.done.save": "Saved.",
   "set.bad": "Not saved, these values don't look right: {fields}. The previous values stay.",
+  "set.bad.one": "Not saved: this value doesn't look right. The previous one stays.",
+  "set.fail": "Couldn't save. Check the connection and try again.",
   "set.done.setup": "Your topic is ready. Subscribe on your phone, then send a test.",
   "set.done.newtopic": "New topic created and saved. Subscribe to it on your phone.",
   "set.done.useurl": "Address saved."

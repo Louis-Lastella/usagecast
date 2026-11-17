@@ -558,6 +558,8 @@
   "set.save": "Speichern",
   "set.done.save": "Gespeichert.",
   "set.bad": "Nicht übernommen, diese Werte passen nicht: {fields}. Die bisherigen Werte bleiben.",
+  "set.bad.one": "Nicht übernommen: dieser Wert passt nicht. Der bisherige bleibt.",
+  "set.fail": "Nicht gespeichert. Prüfe die Verbindung und versuche es noch einmal.",
   "set.done.setup": "Dein Topic ist fertig. Abonniere es auf dem Handy und sende dann einen Test.",
   "set.done.newtopic": "Neues Topic erzeugt und gespeichert. Abonniere es auf dem Handy.",
   "set.done.useurl": "Adresse übernommen."

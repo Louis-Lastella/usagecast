@@ -62,3 +62,60 @@ function mini(W) {
     home.onclick = () => W.addToHomeScreen()
   })
 }
+
+// Settings sub-pages save when a field changes, like iOS: the whole form goes out in one fetch (inside its section a
+// missing checkbox means off), the server answers {ok, bad}. The Save button stays for browsers without JS; the action
+// buttons (set up, test, new topic, ...) still submit normally.
+function autoSave(form) {
+  document.documentElement.classList.add("auto")
+  const toast = document.createElement("div")
+  toast.id = "saved"
+  toast.setAttribute("role", "status")
+  document.body.append(toast)
+  let timer
+  const say = (text, err) => {
+    clearTimeout(timer)
+    toast.textContent = text
+    toast.classList.toggle("bad", err)
+    toast.classList.add("on")
+    timer = setTimeout(() => { toast.classList.remove("on"); timer = setTimeout(() => { toast.textContent = "" }, 250) }, 1500)
+  }
+  const note = (f, text) => {
+    const box = f.closest(".field")?.firstElementChild || f.parentNode
+    box.querySelector(".fnote")?.remove()
+    f.toggleAttribute("aria-invalid", !!text)
+    if (!text) return
+    const n = document.createElement("small")
+    n.className = "fnote"
+    n.setAttribute("role", "alert")
+    n.textContent = text
+    box.append(n)
+  }
+  const post = async el => {
+    try {
+      const r = await fetch(form.getAttribute("action"), { method: "POST", headers: { "X-Usagecast-Auto": "1" }, body: new URLSearchParams(new FormData(form)) })
+      const j = await r.json()
+      if (!j.ok) throw new Error("not saved")
+      for (const f of form.elements) {
+        if (!f.name || !f.matches("input:not([type=checkbox],[type=radio],[type=hidden],[type=password]),select")) continue
+        if (j.bad.includes(f.name)) { f.value = f.defaultValue; note(f, form.dataset.bad); continue }
+        if (f.name in j.num) f.value = j.num[f.name]   // clamped by the server
+        f.defaultValue = f.value
+        note(f, "")
+      }
+      if (j.bad.includes(el.name)) return
+      say(form.dataset.saved, false)
+      if (el.name === "lang") location.replace(location.pathname)
+      if (el.name === "theme") {
+        if (el.value === "system") delete document.documentElement.dataset.theme
+        else document.documentElement.dataset.theme = el.value
+      }
+    } catch (e) { say(form.dataset.fail, true) }
+  }
+  let queue = Promise.resolve()   // one request at a time: two quick changes must not reach the server out of order
+  form.addEventListener("change", e => { if (e.target.matches("input:not([type=hidden]),select")) queue = queue.then(() => post(e.target)) })
+  // Enter in a field: the change event has already saved it, so the hidden default button must not submit the page too
+  form.addEventListener("submit", e => { if (e.submitter?.classList.contains("sr")) e.preventDefault() })
+}
+const setForm = document.querySelector("form.set")
+if (setForm) autoSave(setForm)

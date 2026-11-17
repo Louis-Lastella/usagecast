@@ -3299,7 +3299,8 @@ def page_settings(q, sec=""):
     bad = [T(names[k]) for k in (q.get("bad") or [""])[0].split(",") if k in names]
     if bad:
         note = f'<p class="note" role="alert">{tr("set.bad", fields=", ".join(bad))}</p>'
-    body = (f'{note}<form method="post" action="/settings" class="set"><input type="hidden" name="section" value="{sec}">'
+    body = (f'{note}<form method="post" action="/settings" class="set" data-saved="{e(T("done.save").rstrip("."))}" data-bad="{e(T("bad.one"))}"'
+            f' data-fail="{e(T("fail"))}"><input type="hidden" name="section" value="{sec}">'
             '<button class="sr" name="action" value="save" tabindex="-1" aria-hidden="true"></button>'  # Enter in a field = save
             + SET_PAGES[sec](s, done)
             + f'<div class="save"><button class="btn primary" name="action" value="save">{T("save")}</button></div></form>')
@@ -3388,7 +3389,10 @@ class Handler(BaseHTTPRequestHandler):
         action, sec = form.get("action", "save"), form.get("section", "")
         keys = SECTIONS.get(sec, ())   # no or an unknown section: nothing is saved
         s = clean(form, SET, keys)
-        bad = [k for k in FORMATS if k in keys and form.get(k, "").strip().rstrip("/") not in ("", s[k])]   # clean() kept the old value
+        auto = self.headers.get("X-Usagecast-Auto") == "1"   # static/app.js saves a changed field: JSON back, no redirect
+        bad = [k for k in FORMATS if k in keys and k in form and form[k].strip().rstrip("/") != s[k]]   # clean() kept the old value
+        if auto and not keys:
+            return self.send(b'{"ok": false, "bad": []}', "application/json")
         if action == "ingest":
             s["ingest_token"] = secrets.token_urlsafe(24)
             INGEST_SHOWN["at"] = time.time()
@@ -3404,6 +3408,9 @@ class Handler(BaseHTTPRequestHandler):
         if action == "test":
             ok, reply = send_push(tr("alert.test"), tr("alert.test.text"), 3)
             LAST_PUSH.update(at=time.time(), ok=ok, reply=reply)
+        if auto:
+            self.cookie = f"lang={s['lang']}; Path=/; Max-Age=31536000; SameSite=Lax"
+            return self.send(json.dumps({"ok": True, "bad": bad, "num": {k: s[k] for k in keys if k in RANGES}}).encode(), "application/json")
         self.send_response(303)
         self.send_header("Location", ("/settings/" + sec if sec in SECTIONS else "/settings") + f"?done={quote(action)}"
                          + (f"&bad={','.join(bad)}" if bad else ""))
@@ -3997,6 +4004,27 @@ def selftest():
         r = urllib.request.urlopen(urllib.request.Request(f"http://127.0.0.1:{srv.server_port}/settings", b"section=alerts&quiet_from=25:00&action=save",
                                                           {"Origin": f"http://127.0.0.1:{srv.server_port}"}), timeout=30)
         assert "/settings/alerts?" in r.url and r.url.endswith("bad=quiet_from") and 'role="alert"' in r.read().decode(), r.url
+        def auto(body, origin=here):   # what static/app.js sends when a field changes
+            req = urllib.request.Request(f"{here}/settings", body, {"Origin": origin, "X-Usagecast-Auto": "1"})
+            try:
+                r = urllib.request.urlopen(req, timeout=30)
+                return r.status, r.headers["Content-Type"], json.loads(r.read())
+            except urllib.error.HTTPError as err:
+                return err.code, "", None
+        SET.update(alert_five=True, alert_week=True, theme="light", quiet_from="22:00", alert_digest=True)
+        st, ct, j = auto(b"section=alerts&alert_five=on&quiet_from=23:15&theme=dark")   # alert_week and alert_digest missing = off here
+        assert (st, ct, j["ok"], j["bad"]) == (200, "application/json", True, []) and j["num"] == {k: SET[k] for k in RANGES if k in SECTIONS["alerts"]}, (st, ct, j)
+        assert SET["quiet_from"] == "23:15" and SET["alert_five"] and not SET["alert_week"] and not SET["alert_digest"] and SET["theme"] == "light"   # only the section's keys
+        assert auto(b"section=alerts&quiet_from=25:00&five_min=9999")[2] == {"ok": True, "bad": ["quiet_from"], "num": {"five_min": 240, "chat_pct": SET["chat_pct"], "spike_pct": SET["spike_pct"]}} and SET["quiet_from"] == "23:15" and SET["five_min"] == 240
+        assert auto(b"section=alerts&quiet_from=")[2]["bad"] == ["quiet_from"] and SET["quiet_from"] == "23:15"   # a cleared time is refused too
+        assert auto(b"section=notify&ntfy_topic=a+b")[2]["bad"] == ["ntfy_topic"]
+        before = dict(SET)
+        assert auto(b"theme=dark&quiet_from=01:00")[:2] == (200, "application/json") and SET == before   # no section: ok false, nothing saved
+        assert auto(b"section=nope&theme=dark")[2]["ok"] is False and SET == before
+        assert auto(b"section=look&theme=dark", "http://evil.example")[0] == 403 and SET == before
+        pg = page_settings({}, "alerts")
+        assert 'data-saved="Saved"' in pg and "data-bad=" in pg and "data-fail=" in pg and 'class="sr"' in pg
+        SET.clear(); SET.update(keep); save_settings(dict(SET))
         def ingest(body, tok):
             req = urllib.request.Request(f"http://127.0.0.1:{srv.server_port}/api/ingest", body, {"Authorization": "Bearer " + tok} if tok else {})
             try:
