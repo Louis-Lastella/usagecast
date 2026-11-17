@@ -358,6 +358,22 @@ def tok(s):
     return len(s or "") / CPT
 
 
+def model_name(m):
+    """"Opus 5.5" from claude-opus-5-5 (a date suffix like -20251001 is dropped); other ids stay as they are."""
+    if not (m or "").startswith("claude-"):
+        return m or ""
+    name, *rest = m[7:].split("-")
+    return " ".join([name.title(), ".".join(x for x in rest if x.isdigit() and len(x) < 3)]).strip()
+
+
+def models_of(rows, ttl):
+    """Model names of (model, i, r, w, o) rows, the one that cost most first."""
+    c = defaultdict(float)
+    for m, i, r, w, o in rows:
+        c[model_name(m)] += sum(row_cost(m, i, r, w, o, ttl))
+    return sorted(c, key=lambda k: -c[k])
+
+
 def known_model(model):
     return any(model.startswith(k) for k in PRICES)
 
@@ -812,6 +828,7 @@ def analyze(c, since, snap, ttl, sid=None, logs=None, until=math.inf):
         platform, chat = chats.get(s, (src, NOCHAT))
         sess[s] = dict(title=title, src=src, origin=org, platform=platform, chat=chat, calls=n_calls, cost=total_s, top=top, started=started, comp=dict(sc),
                        turns=turns, ctx1=ctx1, last=last[0], parent=parent if src == "subagent" else None,
+                       models=models_of(((x[0], *x[3:7]) for x in rows), ttl),
                        project=project_of((m[4] for m in msgs.get(s, ()) if m[4]), repos, prx, repo_root))
     # 5 min -> 1 h: rebuilds after pauses up to 1 h disappear, every write costs 2/1.25 = 1.6x. The other way round accordingly.
     if ttl <= 300:
@@ -1979,7 +1996,7 @@ def live(now=None, hs=None):
                 for sid, src, title, parent, what, started, model, i, r, w, o in rows:
                     turn = c.execute("select max(timestamp) from messages where session_id = ? and role = 'user'", (sid,)).fetchone()[0]
                     plat, ch = ci.get(sid, (src, NOCHAT))
-                    runs.append(dict(id=sid, agent=a, src=src, platform=plat, chat=ch, title=title, parent=parent, what=what, since=turn or started or now,
+                    runs.append(dict(id=sid, agent=a, src=src, platform=plat, chat=ch, title=title, parent=parent, what=what, since=turn or started or now, model=model_name(model),
                                      cost=sum(row_cost(model or "", i or 0, r or 0, w or 0, o or 0, ttl))))
             except sqlite3.Error:
                 pass   # no state.db yet, or an older Hermes without the activity columns
@@ -2015,7 +2032,7 @@ def live_card(L, p):
             kids[r["parent"]].append(r)
 
     def row(r, sub=""):
-        meta = ["" if sub else e(bot_chat(r)), e((r["what"] or "")[:48]), tr("live.for", d=dur(L["at"] - r["since"]))]
+        meta = ["" if sub else e(bot_chat(r)), e(r.get("model") or ""), e((r["what"] or "")[:48]), tr("live.for", d=dur(L["at"] - r["since"]))]
         return (f'<a class="job{sub}" href="/s/{quote(r["id"])}?p={e(p)}"><span class="run"><span class="fname">{e((r["title"] or tr("untitled"))[:70])}</span>'
                 f'<span class="why">{" · ".join(x for x in meta if x)}</span></span><span class="v">{money(r["cost"])}</span></a>'
                 + "".join(row(k, " sub") for k in kids[r["id"]]))
@@ -2939,7 +2956,7 @@ def page_sessions(p, q):
             return " · " + tr("ses.by", parent=f'<a href="{link("/s/" + quote(x["parent"]), p=p)}">{e(t[:50])}</a>')
         return " · " + tr("ses.subs", n=cnt(kids[s][0]), cost=money(kids[s][1])) if s in kids else ""
     trs = [(f'<a href="/s/{quote(s)}?p={p}">{e((x["title"] or tr("untitled"))[:80])}</a>'
-             f'<span class="why">{e(bot_chat(x))} · {when(x["last"], "daytime")}{rel(s, x)}</span>',
+             f'<span class="why">{" · ".join(e(v) for v in (bot_chat(x), ", ".join(x.get("models") or ())) if v)} · {when(x["last"], "daytime")}{rel(s, x)}</span>',
             e(proj_label(x["project"] or NO_PROJ)) if x["project"] else "–", cnt(x["calls"]), money(x["cost"]), pct(x["cost"], tot),
             f'<span class="why">{e(label(x["top"], d["ttl"])[0])}</span>') for s, x in rows[:200]]
     body = f"""{flt}
@@ -2978,7 +2995,8 @@ def subagents(c, sid, ttl):
             select s.id, s.title from sessions s join k using (id) order by s.started_at""", (sid,)).fetchall():
         rows = c.execute("""select model, api_call_count, input_tokens, cache_read_tokens, cache_write_tokens, output_tokens
             from session_model_usage where session_id = ? and model like 'claude%'""", (k,)).fetchall()
-        out.append((k, title, sum(x[1] or 0 for x in rows), sum(sum(row_cost(m, i, r, w, o, ttl)) for m, _, i, r, w, o in rows)))
+        out.append((k, title, sum(x[1] or 0 for x in rows), sum(sum(row_cost(m, i, r, w, o, ttl)) for m, _, i, r, w, o in rows),
+                    models_of(((m, i, r, w, o) for m, _, i, r, w, o in rows), ttl)))
     return out
 
 
@@ -3013,11 +3031,13 @@ def page_session(sid, p):
                       f'<a href="{link("/sessions", p=p, bot=bot_key(x), chat=ch["key"])}">{e(chat_label(ch)[0])}</a>',
                       *([tr("ses.by", parent=f'<a href="{link("/s/" + quote(pid), p=p)}">{e((ptitle or tr("untitled"))[:60])}</a>')] if pid else []),
                       tr("ses.project", name=e(proj_label(x["project"] or NO_PROJ))),
-                      tr("ses.started", at=when(x["started"] or 0, "datetime")), tr("ses.steps", n=cnt(x["calls"])), money(x["cost"]),
+                      tr("ses.started", at=when(x["started"] or 0, "datetime")), *([e(", ".join(x["models"]))] if x.get("models") else []),
+                      tr("ses.steps", n=cnt(x["calls"])), money(x["cost"]),
                       *([tr("ses.with_subs", cost=money(x["cost"] + subs))] if kids else [])])
     ktab = ""
     if kids:
-        trs = [(f'<a href="{link("/s/" + quote(k), p=p)}">{e((t or tr("untitled"))[:80])}</a>', cnt(n), money(v), pct(v, tot)) for k, t, n, v in kids]
+        trs = [(f'<a href="{link("/s/" + quote(k), p=p)}">{e((t or tr("untitled"))[:80])}</a>'
+            + (f'<span class="why">{e(", ".join(ms))}</span>' if ms else ""), cnt(n), money(v), pct(v, tot)) for k, t, n, v, ms in kids]
         ktab = f"""<section class="sec"><h2>{tr("ses.subs_h")}</h2>
 <p class="hint">{tr("ses.subs.hint", n=cnt(len(kids)), cost=money(subs), p=pct(subs, tot))}</p>
 {table(["th.session", "th.steps", "th.cost", "th.share"], trs, ("", "", "", ""), "titles")}</section>
@@ -3566,6 +3586,8 @@ def selftest():
     assert segments("me\n# memory-tencentdb\nx", pm)[-1][0] == "plugin:memory_tencentdb"   # - and _ are equivalent
     assert price("claude-opus-5-5")[0] == 4e-6 and price("claude-opus-4-8")[4] == 25e-6 and price("claude-opus-4-1-x")[0] == 15e-6
     assert known_model("claude-opus-5-5") and not known_model("claude-opus-9")
+    assert [model_name(m) for m in ("claude-opus-5-5", "claude-haiku-4-5-20251001", "claude-sonnet-5", "gpt-image-2", None)] == \
+        ["Opus 5.5", "Haiku 4.5", "Sonnet 5", "gpt-image-2", ""]
     CACHE["t"] = (0, "stale"); REFRESHING.add("t")
     assert data_for("t") == "stale"; CACHE.pop("t"); REFRESHING.discard("t")
     # Replay and cache

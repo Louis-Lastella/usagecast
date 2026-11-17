@@ -2,6 +2,12 @@
 
 Versions follow [Semantic Versioning](https://semver.org).
 
+## 3.7.0 - 2026-11-17
+
+- Models: every session and subagent now names the model it runs on ("Opus 5.5", "Haiku 4.5"), in Right now, in the
+  session list, in the session header and in a session's subagent table. A session that switched models lists all of
+  them, the one that cost most first.
+
 ## 3.6.0 - 2026-11-17
 
 - Several accounts: when Hermes' credential pool holds more than one Claude account, Usagecast reads the limits of each
