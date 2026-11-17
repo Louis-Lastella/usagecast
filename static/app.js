@@ -4,12 +4,21 @@
 let tg = false
 try { tg = location.hash.includes("tgWebAppData") || !!sessionStorage.getItem("__telegram__initParams") } catch (e) {}
 
+// The mascot follows the live card's agent count; tight and limit stay as the server rendered them.
+function syncPet() {
+  const card = document.getElementById("live")
+  if (!card) return
+  const st = +card.dataset.n > 0 ? "work" : "calm"
+  document.querySelectorAll(".pet").forEach(p => { if (p.dataset.st === "calm" || p.dataset.st === "work") p.dataset.st = st })
+}
+syncPet()
+
 setInterval(async () => {
   const card = document.getElementById("live")
   if (!card || document.hidden) return
   try {
     const r = await fetch("/live?p=" + encodeURIComponent(card.dataset.p), { cache: "no-store" })
-    if (r.ok) card.outerHTML = await r.text()
+    if (r.ok) { card.outerHTML = await r.text(); syncPet() }
   } catch (e) {}
 }, 5000)
 
