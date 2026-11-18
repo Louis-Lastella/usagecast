@@ -1786,7 +1786,7 @@ def acct_name():
 
 
 def tg_texts(wk, fh, fc, n, now, name=""):
-    """Menu button text (short: it is a button) and pinned message; `name` = primary account when there are several."""
+    """Menu button text (short: it is a button; use first, a phone cuts the end) and pinned message; `name` = primary account when there are several."""
     menu = tr("tg.menu.text", w=round(wk[0]), f=round(fh[0]))
     pin = [tr("tg.pin.week", w=round(wk[0]), fc=round(fc) if fc is not None else "–"),
            tr("tg.pin.five", f=round(fh[0]), at=hm(fh[2]) if fh[2] else "–"), tr("live.n", n=n), tr("tg.pin.at", at=hm(now))]
@@ -3945,9 +3945,9 @@ def selftest():
             wk_, fh_ = (62.0, 0.5, 0), (34.0, 0.5, nw + 60)
             menu_, pin_ = tg_texts(wk_, fh_, 70, 1, nw, acct_name())
             m1_, p1_ = tg_texts(wk_, fh_, 70, 1, nw)
-            assert acct_name() == "personal" and menu_ == "personal · W 62% · 5h 34%" and pin_.splitlines()[0] == "Account: personal", (menu_, pin_)
-            assert tg_texts(wk_, fh_, 70, 1, nw, "claude-second")[0] == "claude-second · W 62% · 5h 34%"   # 13 chars stay whole
-            assert tg_texts(wk_, fh_, 70, 1, nw, "a-very-long-account-x")[0].startswith("a-very-long-acc… ·")
+            assert acct_name() == "personal" and menu_ == "W 62% · 5h 34% · personal" and pin_.splitlines()[0] == "Account: personal", (menu_, pin_)
+            assert tg_texts(wk_, fh_, 70, 1, nw, "claude-second")[0] == "W 62% · 5h 34% · claude-second"   # numbers first: a narrow button cuts the name, not the use
+            assert tg_texts(wk_, fh_, 70, 1, nw, "a-very-long-account-x")[0].endswith("· a-very-long-acc…")
             assert m1_ == "W 62% · 5h 34%" and p1_ == pin_.split("\n", 1)[1] and "Account" not in p1_
             assert json.loads(api_summary())["accounts"] == [
                 {"label": "work", "use": False, "next": True, "primary": False, "five_hour": 10, "seven_day": 20},

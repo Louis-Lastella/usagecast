@@ -2,6 +2,11 @@
 
 Versions follow [Semantic Versioning](https://semver.org).
 
+## 3.9.2 - 2026-11-18
+
+- Telegram menu button: the use comes first ("W 47% · 5h 32% · claude-second"), so a narrow phone button cuts the
+  account name instead of the numbers.
+
 ## 3.9.1 - 2026-11-18
 
 - Telegram menu button: the account name is no longer cut hard at 12 characters ("claude-secon"); names up to 16

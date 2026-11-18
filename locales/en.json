@@ -238,7 +238,7 @@
   "tg.pin.week": "Week {w}% · forecast {fc}%",
   "tg.pin.five": "5-hour window {f}% · resets {at}",
   "tg.pin.at": "As of {at}",
-  "apin.menu": "{label} · W {w}% · 5h {f}%",
+  "apin.menu": "W {w}% · 5h {f}% · {label}",
   "apin.pin": "Account: {label}",
   "ov.models": "Models",
   "ov.estimated": "(estimated price)",

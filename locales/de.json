@@ -238,7 +238,7 @@
   "tg.pin.week": "Woche {w} % · Prognose {fc} %",
   "tg.pin.five": "5-Stunden-Fenster {f} % · frei ab {at}",
   "tg.pin.at": "Stand {at}",
-  "apin.menu": "{label} · W {w}% · 5h {f}%",
+  "apin.menu": "W {w}% · 5h {f}% · {label}",
   "apin.pin": "Konto: {label}",
   "ov.models": "Modelle",
   "ov.estimated": "(Preis geschätzt)",
