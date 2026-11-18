@@ -2,6 +2,11 @@
 
 Versions follow [Semantic Versioning](https://semver.org).
 
+## 3.9.1 - 2026-11-18
+
+- Telegram menu button: the account name is no longer cut hard at 12 characters ("claude-secon"); names up to 16
+  characters stay whole, longer ones end in "…".
+
 ## 3.9.0 - 2026-11-17
 
 - Several accounts: the limits card opens with all of them as one ("All accounts"): the mean use of the week and the

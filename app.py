@@ -1791,7 +1791,7 @@ def tg_texts(wk, fh, fc, n, now, name=""):
     pin = [tr("tg.pin.week", w=round(wk[0]), fc=round(fc) if fc is not None else "–"),
            tr("tg.pin.five", f=round(fh[0]), at=hm(fh[2]) if fh[2] else "–"), tr("live.n", n=n), tr("tg.pin.at", at=hm(now))]
     if name:
-        menu, pin = tr("apin.menu", label=name[:12], w=round(wk[0]), f=round(fh[0])), [tr("apin.pin", label=name)] + pin
+        menu, pin = tr("apin.menu", label=name if len(name) <= 16 else name[:15] + "…", w=round(wk[0]), f=round(fh[0])), [tr("apin.pin", label=name)] + pin
     return menu, "\n".join(pin)
 
 
@@ -3946,6 +3946,8 @@ def selftest():
             menu_, pin_ = tg_texts(wk_, fh_, 70, 1, nw, acct_name())
             m1_, p1_ = tg_texts(wk_, fh_, 70, 1, nw)
             assert acct_name() == "personal" and menu_ == "personal · W 62% · 5h 34%" and pin_.splitlines()[0] == "Account: personal", (menu_, pin_)
+            assert tg_texts(wk_, fh_, 70, 1, nw, "claude-second")[0] == "claude-second · W 62% · 5h 34%"   # 13 chars stay whole
+            assert tg_texts(wk_, fh_, 70, 1, nw, "a-very-long-account-x")[0].startswith("a-very-long-acc… ·")
             assert m1_ == "W 62% · 5h 34%" and p1_ == pin_.split("\n", 1)[1] and "Account" not in p1_
             assert json.loads(api_summary())["accounts"] == [
                 {"label": "work", "use": False, "next": True, "primary": False, "five_hour": 10, "seven_day": 20},
