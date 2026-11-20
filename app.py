@@ -717,6 +717,7 @@ def analyze(c, since, snap, ttl, sid=None, logs=None, until=math.inf):
     for s, rows in usage.items():
         src, title, hsh, started, repo_root, parent = meta.get(s, ("?", None, None, 0, None, None))
         sc, n_calls, turns, last, pk, ctx1 = defaultdict(float), 0, [], [0.0], [], 0
+        tk0 = tot["tokens"]
 
         def put(k, v, t):
             sc[k] += v
@@ -843,7 +844,7 @@ def analyze(c, since, snap, ttl, sid=None, logs=None, until=math.inf):
         top = max(sc.items(), key=lambda x: x[1])[0]
         platform, chat = chats.get(s, (src, NOCHAT))
         sess[s] = dict(title=title, src=src, origin=org, platform=platform, chat=chat, calls=n_calls, cost=total_s, top=top, started=started, comp=dict(sc),
-                       turns=turns, ctx1=ctx1, last=last[0], parent=parent if src == "subagent" else None,
+                       turns=turns, ctx1=ctx1, last=last[0], parent=parent if src == "subagent" else None, tokens=tot["tokens"] - tk0,
                        models=models_of(((x[0], *x[3:7]) for x in rows), ttl),
                        project=project_of((m[4] for m in msgs.get(s, ()) if m[4]), repos, prx, repo_root))
     # 5 min -> 1 h: rebuilds after pauses up to 1 h disappear, every write costs 2/1.25 = 1.6x. The other way round accordingly.
@@ -1091,8 +1092,8 @@ _LH, _LH_LOCK = {"key": None, "off": 0, "rows": []}, threading.Lock()
 
 
 def limit_history(days=7, acct=None):
-    """Rows of data/limits.jsonl newer than `days` for account `acct` (None = the primary one; rows without "a" belong to
-    the primary account). The file only grows, so it is parsed once and later calls read just the lines appended since
+    """Rows of data/limits.jsonl newer than `days` for account `acct` (None = the primary one, ALL = every account; rows
+    without "a" belong to the primary account). The file only grows, so it is parsed once and later calls read just the lines appended since
     (a page used to parse all of it up to four times). A shorter file or another first line means it was rewritten:
     start over."""
     prim = next((a["id"] for a in STATE["accts"] if a["primary"]), "")
@@ -1113,7 +1114,7 @@ def limit_history(days=7, acct=None):
                 except ValueError:
                     pass
             _LH["off"] += end
-            return [h for h in _LH["rows"] if h["t"] > cut and h.get("a", prim) == acct]
+            return [h for h in _LH["rows"] if h["t"] > cut and (acct == ALL or h.get("a", prim) == acct)]
     except OSError:
         return []
 
@@ -2578,6 +2579,101 @@ def per_day(d):
     return out
 
 
+# ---------- Wrapped: a month or a year in numbers (the /wrapped slides render it) ----------
+NIGHT_END = 5      # 00:00-04:59 is night; the "latest" session start counts from 05:00 on
+# Usage type: the first rule that holds, in WRAP_TYPES order; explorer when none does.
+EDGE_HITS = 3      # edge: a limit window hit 100 % at least this often
+CONDUCTOR = 0.3    # conductor: subagents ran at least this share of the API price
+NIGHT_OWL = 0.2    # owl: at least this share of the messages came at night
+FOCUS = 0.6        # focus: the top project took at least this share of the API price
+STEADY = 0.8       # steady: messages on at least this share of the days
+WRAP_TYPES = ("edge", "conductor", "owl", "focus", "steady", "explorer")
+WRAP = {}          # finished periods: (start, end, source) -> wrap_period(); a month's analysis takes ~10 s
+
+
+def wrap_type(w):
+    ok = (sum(w["limits"]["hits"].values()) >= EDGE_HITS, w["subagents"]["cost"] >= CONDUCTOR * w["cost"] > 0,
+          w["night"] >= NIGHT_OWL, bool(w["projects"]) and w["projects"][0][2] >= FOCUS,
+          bool(w["days"]) and sum(map(bool, w["days"])) >= STEADY * len(w["days"]))
+    return next((k for k, y in zip(WRAP_TYPES, ok) if y), "explorer")
+
+
+def limit_moments(a, b):
+    """Limits log in [a, b): times a window reached 100 % (per account), the highest weekly reading, account switches."""
+    hits, prev, rise = {"five_hour": 0, "seven_day": 0}, {}, {}
+    rows = [h for h in limit_history((time.time() - a) / 86400 + 1, ALL) if h["t"] < b]
+    for h in rows:
+        for k in hits:
+            v, p = h.get(k), prev.get((h.get("a", ""), k))
+            if v is None:
+                continue
+            hits[k] += (p or 0) < 100 <= v
+            if k == "five_hour" and p is not None and v > p:
+                rise[h["t"]] = max(rise.get(h["t"], (0, "")), (v - p, h.get("a", "")))
+            prev[(h.get("a", ""), k)] = v
+    # ponytail: the account in use is not logged; the one whose 5 h use rose most per reading counts as in use
+    seq = [x for _, (_, x) in sorted(rise.items())]
+    tight = max(((h["seven_day"], h["t"], h.get("a", "")) for h in rows if h.get("seven_day") is not None), key=lambda x: x[0], default=None)
+    return dict(hits=hits, tightest=tight and dict(used=tight[0], t=tight[1], a=tight[2]),
+                switches=sum(x != y for x, y in zip(seq, seq[1:])))
+
+
+def wrapped(start, end):
+    """Everything the Wrapped slides show for the dates [start, end), a month or a year; a running one is `partial`.
+    prev = the same for the month or year before, None without sessions there."""
+    ps = start.replace(year=start.year - 1) if (end - start).days > 31 else (start - timedelta(days=1)).replace(day=1)
+    p = wrap_period(ps, start)
+    return {**wrap_period(start, end), "prev": p if p["sessions"] else None}
+
+
+def wrap_period(start, end):
+    """wrapped() without prev. Ranked lists are top first, [name, value, share]; messages, hours (24 counts by local
+    hour), days (count per day so far) and the streak count chat messages, no cron or subagent runs."""
+    key = (start, end, SET["source"])
+    if key in WRAP:
+        return WRAP[key]
+    a, b = (datetime.combine(x, datetime.min.time()).timestamp() for x in (start, end))
+    d = data_for(f"{start}..{end - timedelta(days=1)}")
+    tot, sess = d["total"], d["sess"]
+    chats = [x for x in sess.values() if x["src"] not in NOT_CHAT]
+    hours, days = [0] * 24, [0] * max(0, (min(end, datetime.now().date() + timedelta(days=1)) - start).days)
+    for x in chats:
+        for t, *_ in x["turns"]:
+            lt = datetime.fromtimestamp(t)
+            hours[lt.hour] += 1
+            if 0 <= (lt.date() - start).days < len(days):
+                days[(lt.date() - start).days] += 1
+    streak = run = 0
+    for n in days:
+        run = run + 1 if n else 0
+        streak = max(streak, run)
+    top = lambda c, of: [[k, v, v / of if of else 0.0] for k, v in sorted(c.items(), key=lambda kv: -kv[1])[:5]]
+    proj, tools, models, subs = defaultdict(float), Counter(), defaultdict(float), [x for x in sess.values() if x["src"] == "subagent"]
+    for x in sess.values():
+        if x["project"]:
+            proj[x["project"]] += x["cost"]
+    for k, n in d["uses"].items():
+        if k.startswith(("tool:", "skill:")):
+            tools[k[5:] if k[0] == "t" else "skill_view"] += n
+    for m, (_, _, c) in d["models"].items():
+        models[model_name(m)] += c
+    big = max(sess.items(), key=lambda kv: kv[1]["tokens"], default=None)
+    starts = [x["started"] for x in chats if a <= x["started"] < b]
+    late = lambda t: ((datetime.fromtimestamp(t).hour - NIGHT_END) % 24, datetime.fromtimestamp(t).minute)
+    w = dict(start=start.isoformat(), end=end.isoformat(), partial=b > time.time(), tokens=round(d["tokens"]), cost=tot,
+             sessions=len(sess), messages=sum(hours), projects=top(proj, tot), tools=top(tools, sum(tools.values())),
+             models=top(models, tot), hours=hours, peak_hour=hours.index(max(hours)) if any(hours) else None,
+             latest=max(starts, key=late, default=None), night=sum(hours[:NIGHT_END]) / (sum(hours) or 1), days=days,
+             streak=streak, biggest=big and dict(id=big[0], title=big[1]["title"], agent=big[1].get("agent", ""),
+                                                 tokens=round(big[1]["tokens"]), cost=big[1]["cost"]),
+             limits=limit_moments(a, b),
+             subagents=dict(n=len(subs), cost=sum(x["cost"] for x in subs), models=top(Counter(x["models"][0] for x in subs if x["models"]), len(subs))))
+    w["type"] = wrap_type(w)
+    if not w["partial"]:   # ponytail: kept until a restart; a finished month only changes if Hermes rewrites old rows
+        WRAP[key] = w
+    return w
+
+
 def page_overview(p):
     d, d30, snap = data_for(p), data_for("30"), load_snap()
     w = d if p == "w" else data_for("w")
@@ -3715,11 +3811,61 @@ def selftest_chats():
     assert list(g["w:subagent"][1]) == ["telegram:42:7"] and bot_key({"src": "cli"}) == ":cli"
 
 
+def selftest_wrapped():
+    """Wrapped on the demo month (moved into October 2026, every project path made /opt/shop) and on an empty month."""
+    global HERMES, DATA
+    old, D = (HERMES, DATA), datetime(2026, 10, 1).date()
+    with tempfile.TemporaryDirectory() as tmp:
+        HERMES, DATA = Path(tmp), Path(tmp) / "data"
+        DATA.mkdir()
+        db = demo_db(datetime(2026, 10, 31, 12).timestamp())   # data from Oct 1 12:00 to Oct 31 12:00
+        db.execute("update messages set tool_calls = replace(replace(tool_calls, '/srv/blog', '/opt/shop'), '/opt/wiki', '/opt/shop')")
+        db.commit()
+        db.backup(disk := sqlite3.connect(HERMES / "state.db"))
+        disk.close()
+        t = lambda d, h: datetime(2026, 10, d, h).timestamp()
+        (DATA / "limits.jsonl").write_text("".join(json.dumps(r) + "\n" for r in [
+            {"t": t(2, 9), "a": "x", "five_hour": 50, "seven_day": 20}, {"t": t(2, 9), "a": "y", "five_hour": 0, "seven_day": 5},
+            {"t": t(2, 10), "a": "x", "five_hour": 100, "seven_day": 30}, {"t": t(2, 10), "a": "y", "five_hour": 0, "seven_day": 5},
+            {"t": t(2, 11), "a": "x", "five_hour": 100, "seven_day": 31}, {"t": t(2, 11), "a": "y", "five_hour": 40, "seven_day": 9},
+            {"t": t(9, 9), "a": "x", "five_hour": 0, "seven_day": 100}, {"t": t(9, 9), "a": "y", "five_hour": 90, "seven_day": 60},
+            {"t": t(9, 10), "a": "x", "five_hour": 30, "seven_day": 100}, {"t": t(9, 10), "a": "y", "five_hour": 90, "seven_day": 60}]))
+        w = wrapped(D, datetime(2026, 11, 1).date())
+        q = lambda sql: db.execute(sql).fetchall()
+        assert w["sessions"] == q("select count(distinct session_id) from session_model_usage")[0][0], w["sessions"]
+        assert w["tokens"] == q("select sum(input_tokens + cache_read_tokens + cache_write_tokens + output_tokens) from session_model_usage")[0][0]
+        assert w["messages"] == sum(w["hours"]) == q("""select count(*) from messages m join sessions s on s.id = m.session_id
+            where m.role = 'user' and s.source not in ('cron', 'subagent')""")[0][0]
+        active = {datetime.fromtimestamp(x).date() for (x,) in q("""select m.timestamp from messages m join sessions s on s.id = m.session_id
+            where m.role = 'user' and s.source not in ('cron', 'subagent')""")}
+        run = [D + timedelta(days=i) in active for i in range(31)]
+        assert len(w["days"]) == 31 and [bool(n) for n in w["days"]] == run, w["days"]
+        assert w["streak"] == max(len(x) for x in "".join("1" if r else " " for r in run).split()), w["streak"]
+        assert w["projects"][0][0] == "shop" and w["projects"][0][2] > FOCUS and w["type"] == "focus", (w["projects"], w["type"])
+        assert w["tools"][0][0] == "terminal" and w["models"][0][0] == "Opus 5.5" and w["night"] == 0 and 8 <= w["peak_hour"] <= 23
+        assert w["limits"] == dict(hits={"five_hour": 1, "seven_day": 1}, tightest=dict(used=100, t=t(9, 9), a="x"), switches=2), w["limits"]
+        assert w["biggest"]["tokens"] == max(n for (n,) in q("""select sum(input_tokens + cache_read_tokens + cache_write_tokens + output_tokens)
+            from session_model_usage group by session_id"""))
+        assert w["prev"] is None and not w["partial"] and w["subagents"] == dict(n=0, cost=0, models=[])
+        json.dumps(w)
+        e = wrapped(datetime(2026, 8, 1).date(), datetime(2026, 9, 1).date())   # no data at all
+        assert (e["sessions"], e["tokens"], e["projects"], e["biggest"], e["latest"], e["streak"], e["prev"], e["type"]) == (0, 0, [], None, None, 0, None, "explorer")
+        assert wrapped(datetime(2026, 1, 1).date(), datetime(2027, 1, 1).date())["prev"] is None   # a year, 2025 empty
+        now_ = datetime.now().date()
+        assert wrapped(now_.replace(day=1), (now_.replace(day=28) + timedelta(days=4)).replace(day=1))["partial"]
+        assert wrap_type({**w, "limits": {"hits": {"five_hour": 3}}}) == "edge" and wrap_type({**w, "subagents": {"cost": w["cost"]}}) == "conductor"
+        assert wrap_type({**w, "night": 0.5}) == "owl" and wrap_type({**w, "projects": [], "days": [1, 1, 1, 1, 0]}) == "steady"
+        assert wrap_type({**w, "projects": [], "days": [1, 0, 0]}) == "explorer"
+    HERMES, DATA = old
+    CACHE.clear(); WRAP.clear()
+
+
 def selftest():
     selftest_v4()
     selftest_chats()
     global HERMES, DATA, CLAUDE
     SET.clear(); SET.update(DEFAULTS); FX.clear(); FC.clear()   # the installed settings must not change the expected formats
+    selftest_wrapped()
     # Locales: same keys and placeholders everywhere, every literal key used in the code exists
     src = Path(__file__).read_text("utf-8")
     used = set(re.findall(r'tr\(\s*"([\w.:-]+)"(?=\s*[,)])', src)) | set(re.findall(r'"(th\.[\w]+)"', src))  # "x." + k: below
@@ -3727,6 +3873,7 @@ def selftest():
     used |= {f"period.{k}" for k in PERIODS} | {f"win.{k}" for k, _ in WINDOWS} | {f"since.{k}" for k in ("w", "1", "7", "30")}
     used |= {f"seg.{k}" for k, _ in HERMES_MARKERS} | {"seg.soul", "seg.misc", "seg.notes", "tip.ttl1h.text", "tip.ttl5m.text"}
     used |= {f"brk.{k}" for k in BREAKS} | {f"brk.{k}.why" for k in BREAKS}
+    used |= {f"wrap.type.{k}" for k in WRAP_TYPES} | {f"wrap.type.{k}.why" for k in WRAP_TYPES}
     used |= {"hist.per.hour", "hist.per.day", "ses.after_pause", "ses.no_pause", "foot.ntfy.on", "foot.ntfy.off", "tip.ttl1h", "tip.ttl5m"}
     for code, texts in LOC.items():
         assert set(texts) == set(LOC["en"]), (code, set(texts) ^ set(LOC["en"]))
