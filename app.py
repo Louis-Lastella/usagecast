@@ -1128,6 +1128,11 @@ def usage(tok):
     return json.loads(urllib.request.urlopen(req, timeout=20).read().decode())
 try:   # every OAuth account of Hermes' credential pool, each with its own token
     from agent.credential_pool import load_pool, get_pool_strategy
+    try:   # an account an outside controller wants used first (pool_preference.json, not in every Hermes)
+        from agent.credential_pool import preferred_entry_id
+        preferred = preferred_entry_id("anthropic")
+    except Exception:
+        preferred = None
     pool = load_pool("anthropic")
     es = sorted((e for e in pool.entries() if e.auth_type == "oauth"), key=lambda e: e.priority)
 except Exception:
@@ -1163,16 +1168,19 @@ for e in es:
     except Exception as x:   # never the message: it could quote a token
         a["error"] = "HTTP %s" % x.code if hasattr(x, "code") else type(x).__name__
     out.append(a)
-print(json.dumps({"strategy": get_pool_strategy("anthropic"), "accounts": out}))
+print(json.dumps({"strategy": get_pool_strategy("anthropic"), "preferred": preferred, "accounts": out}))
 '''
 STATE = {"limits": None, "at": 0.0, "ok": 0.0, "accts": []}  # at = last attempt, ok = last successful fetch (primary account)
 LIMITS_LOCK = threading.Lock()
 
 
-def pick(accts, prev, strategy, now):
+def pick(accts, prev, strategy, now, preferred=None):
     """Which pooled account is in use. Hermes keeps its current pick in memory only, so: `use` = 5 h %, week % or request
-    count rose since the previous reading (in use for 30 min after), `next` = the account Hermes would pick next,
-    `primary` = the one to show. prev/returned state: {id: {"5h", "7d", "n", "used_at"}} (data/accounts.json)."""
+    count rose since the previous reading (in use for 30 min after), `next` = the account Hermes would pick next (the
+    available `preferred` one first, as Hermes' select() does, else by strategy), `primary` = the one to show: preferred,
+    else in use and next, else the most recently risen. Only the primary and accounts that rose in this very reading
+    keep `use`, so after a switch the old account drops its badge instead of showing it for 30 min.
+    prev/returned state: {id: {"5h", "7d", "n", "used_at"}} (data/accounts.json)."""
     state, out = {}, []
     for a in accts:
         u, p = a.get("usage") or {}, prev.get(a["id"]) or {}
@@ -1186,13 +1194,17 @@ def pick(accts, prev, strategy, now):
     av = sorted((a.get("priority") or 0, i) for i, a in enumerate(accts) if a.get("avail"))
     if strategy == "least_used":
         av.sort(key=lambda x: accts[x[1]].get("requests") or 0)   # stable: ties by priority
-    if av and strategy != "random":   # random: no way to tell
+    pref = next((i for i, a in enumerate(accts) if a.get("avail") and a["id"] == preferred), None) if preferred else None
+    if pref is not None:
+        out[pref]["next"] = True
+    elif av and strategy != "random":   # random: no way to tell
         out[av[0][1]]["next"] = True
     busy = sorted((o for o in out if o["use"]), key=lambda o: -o["_t"])
     nxt = [o for o in out if o["next"]]
-    top = next((o for o in busy if o["next"]), None) or (busy or nxt or out)[0]
+    top = out[pref] if pref is not None else next((o for o in busy if o["next"]), None) or (busy or nxt or out)[0]
     for o in out:
         o["primary"] = o is top
+        o["use"] = o["use"] and (o is top or o["_t"] == now)
         del o["_t"]
     return out, state
 
@@ -1220,7 +1232,7 @@ def refresh_limits(max_age):
             prev = json.loads(f.read_text())
         except (OSError, ValueError):
             prev = {}
-        flags, keep = pick(accts, prev, data.get("strategy") or "", now)
+        flags, keep = pick(accts, prev, data.get("strategy") or "", now, data.get("preferred"))
         DATA.mkdir(parents=True, exist_ok=True)
         f.with_suffix(".tmp").write_text(json.dumps(keep))
         f.with_suffix(".tmp").replace(f)
@@ -3929,6 +3941,12 @@ def selftest():
         both = {"w1": {"5h": 10, "7d": 20, "n": 5, "used_at": nw - 100}, "p2": {"5h": 0, "7d": 0, "n": 2, "used_at": nw - 50}}
         assert pick(ac, both, "fill_first", nw)[0][0]["primary"]   # both in use: the one that is also next
         assert pick(ac, both, "random", nw)[0][1]["primary"]       # else the most recently risen
+        assert fl(pick(ac, both, "fill_first", nw)) == [("w1", True, True, True), ("p2", False, False, False)]   # older riser: no badge
+        assert fl(pick(ac, {}, "fill_first", nw, "p2")) == [("w1", False, False, False), ("p2", False, True, True)]   # preferred
+        assert fl(pick([ac[0], dict(ac[1], avail=False)], {}, "fill_first", nw, "p2"))[0] == ("w1", False, True, True)   # benched: ignored
+        sw = {"w1": {"5h": 10, "7d": 20, "n": 5, "used_at": nw - 600}, "p2": {"5h": 0, "7d": 0, "n": 1, "used_at": nw - 300}}
+        assert fl(pick(ac, sw, "fill_first", nw, "p2")) == [("w1", False, False, False), ("p2", True, True, True)]   # switched over
+        assert [o["use"] for o in pick([dict(ac[0], requests=6), dict(ac[1], requests=3)], sw, "fill_first", nw)[0]] == [True, True]   # both rising
         r = pick([{"id": "", "avail": True, "usage": U(5, 5)}], {}, "", nw)
         assert fl(r) == [("", False, True, True)] and r[1][""]["7d"] == 5   # single account
         st0, run0, feed = dict(STATE), subprocess.run, {"strategy": "fill_first", "accounts": ac}

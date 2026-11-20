@@ -2,6 +2,12 @@
 
 Versions follow [Semantic Versioning](https://semver.org).
 
+## 3.9.3 - 2026-11-20
+
+- Several accounts: an account Hermes was told to prefer (pool_preference.json, e.g. from a timer that switches
+  accounts) now counts as the next and shown one, so the account really in use is on top again. After a switch the
+  old account drops its "In use" badge at the next reading instead of keeping it for 30 minutes.
+
 ## 3.9.2 - 2026-11-18
 
 - Telegram menu button: the use comes first ("W 47% · 5h 32% · claude-second"), so a narrow phone button cuts the
