@@ -43,10 +43,16 @@ limit number 80/600 (-0.04em) · KPI 26/600. Labels are sentence case, never upp
 - Every fold (`details.more`, `details.bar`) shows the same small chevron after its label, never the
   native triangle.
 - A command to copy is a `pre.cmd` block (tinted, mono, wraps, a tap selects all); short commands in text stay `code`.
+- Wrapped (`/wrapped?m=YYYY-MM` or `?y=YYYY`) is a story: full-screen slides in a phone-shaped column, tap the halves or swipe,
+  progress bars on top. Each slide has a muted label, one big number or word, a sentence and at most one small graphic
+  (ranked bars, hour heatmap, day dots); a muted line under the number compares it with the period before. No new colours.
 - Lists of things with a value (cron jobs, reporting machines) are `.jobs` rows: name left, value right, no bullets.
 - Phone (<= 860 px): the sidebar becomes a bottom tab bar with labels; every control is >= 40-44 px tall.
 - Motion: only 150-200 ms state feedback (switches, folds); nothing animates on load and zoom is locked on phones.
   `prefers-reduced-motion` turns it all off.
+  Exception: the Wrapped slides (`/wrapped`) play once each time a slide comes into view, 150-900 ms: numbers count up,
+  lines fade in, bars grow, the hour heatmap fills and the active days light up. Nothing on them loops except the
+  mascot, and reduced motion shows every slide in its end state.
   Exception: the mascot beside the big weekly number (`pets.py`, setting `pet`) loops quietly (1-4 s) to show its mood
   (calm, agent working, tight, at the limit); its colors are the `--pet-*` tokens, and reduced motion stops it too.
 - Haptics: a tapped control (tab, chip, button, fold, switch) gives a short vibration, `static/haptics.js`. iOS has no

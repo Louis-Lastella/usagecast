@@ -29,6 +29,7 @@ Ohne Hermes ausprobieren: `python3 app.py --demo` startet es mit einem Monat erf
 | `/history` | Kosten pro Tag nach den größten Posten mit Markern für Hermes-Updates und Config-Änderungen, diese Woche über den drei davor, Heatmap nach Wochentag und Uhrzeit, Aktivitätskalender, Tagestabelle |
 | `/details` | Alle Tools, Skills, Plugins, Systemprompt-Teile und Tool-Beschreibungen einzeln, Cache-Brüche mit wahrscheinlicher Ursache, die zehn teuersten einzelnen Tool-Ergebnisse |
 | `/sessions` | Teuerste Sessions mit Bot · Chat, Modell und letzter Aktivität unter jedem Titel, einem Chip pro Bot, Chat-Filter und Suche; der Chip Cron-Jobs zeigt Kosten pro Lauf und Woche. Eine Session-Seite zeigt jeden Schritt, das Modell, die gestarteten Subagenten mit Modell und Kosten und den Befehl `hermes --resume <id>` |
+| `/wrapped` | Ein Monat oder ein Jahr als Story-Folien (siehe Wrapped unten) |
 | `/projects` | Kosten pro Projekt, antippen zeigt die Sessions dazu |
 | `/settings` | Eine kurze Liste mit je einer Seite: Darstellung, Warnungen, Benachrichtigungen, Budget-Wächter, Erweitert |
 | `/api/summary` | Limits, Prognose, Konten und Kosten der Limit-Woche als JSON, für Widgets |
@@ -59,6 +60,15 @@ klappt jedes Konto einzeln auf, und das Gerät merkt sich, ob es offen war.
 oder Bot. Er folgt dem 5-Stunden-Fenster (ohne eins der Woche) und hat vier Stimmungen, je nachdem wie voll das Fenster
 ist: ruhig, beschäftigt ab 50 %, knapp ab 85 % (oder knappe Prognose) und schlafend am Limit. Kaffeestand und Bot-Akku zeigen, was übrig ist. Er folgt hell und
 dunkel und steht still bei reduzierter Bewegung. Auswählen oder ausschalten unter Einstellungen > Darstellung.
+
+## Wrapped
+
+`/wrapped?m=2026-10` (ein Monat) oder `/wrapped?y=2026` (ein Jahr) zeigt deine Nutzung als Story-Folien im Vollbild, per
+Tippen oder Wischen: Tokens und API-Gegenwert, das Top-Projekt, das meistgenutzte Tool, die geschäftigste Stunde, die
+längste Serie, wie oft du ans Limit gestoßen bist, Subagent-Läufe und ein Nutzungstyp mit dem Maskottchen. Unter jeder
+großen Zahl steht eine gedämpfte Zeile im Vergleich zum Monat oder Jahr davor. Ein laufender Monat heißt „bisher“. Der Verlauf
+verlinkt jeden Monat und jedes Jahr mit Daten, und in den ersten Tagen eines Monats verweist die Übersicht auf den letzten.
+Alles wird lokal aus denselben Daten berechnet.
 
 ## Sprachen
 

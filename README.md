@@ -30,6 +30,7 @@ Try it without Hermes: `python3 app.py --demo` starts it on a month of made-up d
 | `/history` | Cost per day by the biggest items with markers for Hermes updates and config changes, this week laid over the three before, heatmap by weekday and hour, activity calendar, day-by-day table |
 | `/details` | Every tool, skill, plugin, system prompt part and tool description on its own, cache breaks with their likely cause, the ten most expensive single tool results |
 | `/sessions` | Most expensive sessions with bot · chat, model and last activity under each title, a chip per bot, a chat filter and search; the cron chip shows cost per run and per week. A session page shows every step, the model, the subagents it started with their model and cost, and the `hermes --resume <id>` command |
+| `/wrapped` | A month or a year as story slides (see Wrapped below) |
 | `/projects` | Cost per project, tap one to see its sessions |
 | `/settings` | A short list with one page each: appearance, alerts, notifications, budget guard, advanced |
 | `/api/summary` | Limits, forecast, accounts and this limit week's cost as JSON, for widgets |
@@ -60,6 +61,14 @@ folds out each account on its own, and the device remembers whether it was open.
 follows the 5-hour window (the week if your plan has none) and shows four moods by how full that window is: calm, busy from 50 %,
 tight from 85 % (or a tight forecast) and asleep at the limit. Coffee level and bot battery show what is left. It follows light and dark
 mode and stands still with reduced motion. Pick one or turn it off under Settings > Appearance.
+
+## Wrapped
+
+`/wrapped?m=2026-10` (a month) or `/wrapped?y=2026` (a year) plays your usage as full-screen story slides, tap or swipe
+through them: tokens and API-price value, the top project, the most used tool, the busiest hour, the longest streak, the
+times you hit a limit, subagent runs, and a usage type with the mascot. Each big number has a muted line against the
+month or year before. A running month shows "so far". The History page links every month and year with data, and on
+the first days of a month the overview points to the last one. All of it is computed locally from the same data.
 
 ## Languages
 

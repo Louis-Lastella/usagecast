@@ -2,6 +2,21 @@
 
 Versions follow [Semantic Versioning](https://semver.org).
 
+## 3.10.0 - 2026-11-20
+
+- Wrapped: `/wrapped?m=2026-10` or `/wrapped?y=2026` sums a month or a year up as full-screen story slides (tap or
+  swipe): tokens and API-price value, top project, most used tool and models, busiest hour, longest streak, times at
+  the limit, subagent runs, and one of six usage types (Edge runner, Conductor, Night owl, Deep focus, Steady,
+  Explorer) with the mascot. The numbers count up, bars grow, the hour heatmap fills and the active days light up, once
+  per slide; reduced motion shows the end state. Messages, hours, days and the streak count chat turns only, no cron or
+  subagent runs.
+- A running month or year is refreshed hourly in the background (a year costs 20-60 s of CPU on a big install); the
+  first look at a cold period shows a short loading slide.
+- Under each big number sits a muted line against the month or year before ("+23 % vs Oct", German "+23 % zu Okt."), left out
+  when there is nothing to compare with.
+- History: a row "Wrapped: Oct · Nov · 2026" links every month and year that has sessions. Overview: on days 1-7 of a
+  month a note links last month's Wrapped.
+
 ## 3.9.4 - 2026-11-20
 
 - Session page: Hermes cuts long subagent titles ("Subagent: Implement GitHub issue #12 of…"). Such a session now has

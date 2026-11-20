@@ -2702,6 +2702,34 @@ def wrap_span(q):
     return s, s.replace(year=s.year + 1) if y else (s + timedelta(days=32)).replace(day=1)
 
 
+def wrap_months():
+    """{"YYYY-MM"} of the months with Claude sessions in the analysed homes: one query per home, no analysis."""
+    out = set()
+    for _, h in homes():
+        with at_home(h):
+            try:
+                c = connect()
+                out |= {m for (m,) in c.execute("""select distinct strftime('%Y-%m', started_at, 'unixepoch', 'localtime') from sessions
+                    where id in (select session_id from session_model_usage where model like 'claude%')""") if m}
+                c.close()
+            except sqlite3.Error:
+                pass
+    return out
+
+
+def wrap_links(today):
+    """The history page's row "Wrapped: Oct · Nov · 2026": every month and year with sessions links to its slides."""
+    ms = sorted(wrap_months())
+    mon = lambda m: LOC[lang()]["months"][int(m[5:]) - 1] + ("" if m[:4] == str(today.year) else f" {m[:4]}")
+    links = [(f"m={m}", mon(m)) for m in ms] + [(f"y={y}", y) for y in sorted({m[:4] for m in ms})]
+    return f'<p class="hint">{tr("wrap.title")}: ' + " · ".join(f'<a href="/wrapped?{q}">{t}</a>' for q, t in links) + "</p>" if ms else ""
+
+
+def recap_month(today):
+    """Last month as YYYY-MM on days 1-7 of a month (the overview offers its Wrapped then), else None."""
+    return f"{today - timedelta(days=today.day):%Y-%m}" if today.day <= 7 else None
+
+
 def wrap_ready(start, end):
     """wrapped() when it is cached or done within 2 s, else None while a thread computes it (a cold month takes 10-20 s)."""
     k = (start, end, SET["source"])
@@ -2742,6 +2770,10 @@ def page_wrapped(q):
     name = str(start.year) if yr else f'{LOC[lang()]["wrap.months"][start.month - 1]} {start.year}'
     big = lambda v, unit="": f'<div class="big"><b class="up">{v}</b><span>{unit}</span></div>'
     word = lambda v: f'<div class="big wt">{e(v)}</div>'
+    pv = w and w["prev"]   # the month or year before: its short name (or year) ends the comparison line
+    pl = pv and (pv["start"][:4] if yr else LOC[lang()]["months"][int(pv["start"][5:7]) - 1])
+    cmp = lambda cur, prev: f'<p class="cmp">{T("vs", d=signed(cur, prev), p=pl)}</p>' if pv and prev else ""
+    of = lambda key, name: pv and {k: v for k, v, _ in pv[key]}.get(name)   # the same project/tool last period
     say = lambda *x: "".join(f'<p class="say">{s}</p>' for s in x if s)
     S = []
     if w is None:
@@ -2749,14 +2781,14 @@ def page_wrapped(q):
     elif not w["sessions"]:
         S.append(word(T("empty")) + say(T("empty.why")))
     else:
-        S.append(f'<p class="wk">{T("total.k")}</p>' + big(num(w["tokens"]), T("tokens"))
+        S.append(f'<p class="wk">{T("total.k")}</p>' + big(num(w["tokens"]), T("tokens")) + cmp(w["tokens"], pv and pv["tokens"])
                  + say(T("totals", cost=cash(w["cost"]), sessions=cnt(w["sessions"]), messages=cnt(w["messages"]))))
         if w["projects"]:
-            S.append(f'<p class="wk">{T("project.k")}</p>' + word(proj_label(w["projects"][0][0])) + say(T("project", share=pc(w["projects"][0][2] * 100)))
+            S.append(f'<p class="wk">{T("project.k")}</p>' + word(proj_label(w["projects"][0][0])) + cmp(w["projects"][0][1], of("projects", w["projects"][0][0])) + say(T("project", share=pc(w["projects"][0][2] * 100)))
                      + wbars([(proj_label(k), pc(s * 100), s) for k, _, s in w["projects"]]))
         if w["tools"]:
             t0 = w["tools"][0]
-            S.append(f'<p class="wk">{T("tool.k")}</p>' + word(t0[0]) + say(T("tool", n=cnt(t0[1]), share=pc(t0[2] * 100)))
+            S.append(f'<p class="wk">{T("tool.k")}</p>' + word(t0[0]) + cmp(t0[1], of("tools", t0[0])) + say(T("tool", n=cnt(t0[1]), share=pc(t0[2] * 100)))
                      + wbars([(k, cnt(n), n) for k, n, _ in w["tools"][:3]])
                      + (f'<p class="wk wsub">{T("models")}</p>' + wbars([(k, pc(s * 100), s) for k, _, s in w["models"][:3]]) if w["models"] else ""))
         if w["peak_hour"] is not None:
@@ -2768,19 +2800,19 @@ def page_wrapped(q):
                      + f'<div class="wh">{heat}</div><div class="axis">{axis}</div>')
         if any(w["days"]):
             b = w["biggest"]
-            S.append(f'<p class="wk">{T("streak.k")}</p>' + big(cnt(w["streak"]), T("day" if w["streak"] == 1 else "days"))
+            S.append(f'<p class="wk">{T("streak.k")}</p>' + big(cnt(w["streak"]), T("day" if w["streak"] == 1 else "days")) + cmp(w["streak"], pv and pv["streak"])
                      + say(T("active", n=cnt(sum(map(bool, w["days"]))), of=cnt(len(w["days"]))))
                      + wdays(w["days"], start, yr)
                      + say(b and T("biggest", title=e(b["title"] or tr("untitled")), tokens=num(b["tokens"]), cost=cash(b["cost"]))))
         L = w["limits"]
         if L["tightest"]:
-            S.append(f'<p class="wk">{T("limits.k")}</p>' + big(cnt(sum(L["hits"].values())), T("times"))
+            S.append(f'<p class="wk">{T("limits.k")}</p>' + big(cnt(sum(L["hits"].values())), T("times")) + cmp(sum(L["hits"].values()), pv and sum(pv["limits"]["hits"].values()))
                      + say(T("hits", five=cnt(L["hits"]["five_hour"]), week=cnt(L["hits"]["seven_day"])),
                            T("tightest", used=pc(L["tightest"]["used"]), day=when(L["tightest"]["t"], "day"))
                            + (" " + T("switches", n=cnt(L["switches"])) if L["switches"] else "")))
         if w["subagents"]["n"]:
             sa = w["subagents"]
-            S.append(f'<p class="wk">{T("subs.k")}</p>' + big(cnt(sa["n"]), T("subs.unit"))
+            S.append(f'<p class="wk">{T("subs.k")}</p>' + big(cnt(sa["n"]), T("subs.unit")) + cmp(sa["n"], pv and pv["subagents"]["n"])
                      + say(T("subs", cost=cash(sa["cost"]), share=pc(sa["cost"] / (w["cost"] or 1) * 100)))
                      + wbars([(k, cnt(n), n) for k, n, _ in sa["models"][:3]]))
         S.append(f'<p class="wk">{T("type.k")}</p>' + word(tr("wrap.type." + w["type"])) + say(tr("wrap.type." + w["type"] + ".why"))
@@ -2838,7 +2870,9 @@ def page_overview(p):
     push = "" if push_on() else f'<p class="hint pushoff">{tr("ov.push", url="/settings/notify")}</p>'
     split = limit_split(limit_history(), d30["hours"], cc_calls(w["since"]), w["since"]) if w["week"] else None
     now_live = live()
-    body = f"""{limits_card(w["total"] if w["week"] else None, split)}{live_card(now_live, p)}{guard_note()}{push}
+    rm = recap_month(datetime.now().date())
+    recap = f'<p class="note"><a href="/wrapped?m={rm}">{tr("ov.wrap", month=LOC[lang()]["wrap.months"][int(rm[5:]) - 1])}</a></p>' if rm and rm in wrap_months() else ""
+    body = f"""{limits_card(w["total"] if w["week"] else None, split)}{live_card(now_live, p)}{guard_note()}{push}{recap}
 <div class="kpis">{kpi_html}</div>
 <div class="grid g2">
 <section class="card"><h2>{tr("ov.eats")}</h2>
@@ -3074,7 +3108,7 @@ def page_history(p):
         if c > 0:
             rows.append((when(t, "day"), money(c), pct(c, tot), cnt(steps), cnt(len(ss)),
                          f'<span class="why">{e(label(max(comp.items(), key=lambda x: x[1])[0], ttl)[0])}</span>'))
-    body = f"""<section class="card"><div class="row"><h2>{tr("hist.per.hour" if d["hourly"] else "hist.per.day")}</h2>
+    body = f"""{wrap_links(datetime.now().date())}<section class="card"><div class="row"><h2>{tr("hist.per.hour" if d["hourly"] else "hist.per.day")}</h2>
 <span class="v">{money(d["total"])}</span></div>
 <p class="hint">{tr("hist.hint")}</p>
 {stacked(d)}{event_list(d, d30)}</section>
@@ -3988,6 +4022,21 @@ def selftest_wrapped():
             text = re.sub(r"<[^>]+>", " ", pg + em + page_wrapped({"y": ["2026"]}))
             assert pg.count('<section class="ws"') == 7 and em.count('<section class="ws"') == 1 and tr("wrap.empty") in em, (pg, em)
             assert "{" not in text and "wrap." not in text and 'class="pet"' in pg and "refresh" not in pg, text
+        sep = datetime(2026, 9, 1).date()   # September = the demo month with fewer of everything: a comparison line under each big number
+        WRAP[(sep, D, SET["source"])] = (0, {**w, "prev": None, "tokens": w["tokens"] // 2, "streak": 2, "projects": [["shop", 1.0, 1.0]], "tools": [["terminal", 10, 1.0]],
+                                             "limits": {**w["limits"], "hits": {"five_hour": 1, "seven_day": 0}}, "start": sep.isoformat()})
+        _req.lang = "en"
+        cm = page_wrapped({"m": ["2026-10"]})
+        assert cm.count('class="cmp"') == 5 and "vs Sep</p>" in cm and 'class="cmp"' not in page_wrapped({"m": ["2026-08"]}), cm   # tokens, project, tool, streak, limits (no subagents in Oct)
+        assert 'class="cmp"' not in page_wrapped({"y": ["2026"]})   # 2025 is empty
+        _req.lang = "de"
+        assert "zu Sept.</p>" in page_wrapped({"m": ["2026-10"]})
+        _req.lang = "en"
+        assert wrap_months() == {"2026-10"} and wrap_links(datetime(2026, 11, 20)) == ('<p class="hint">Wrapped: <a href="/wrapped?m=2026-10">Oct</a>'
+                                                                                         ' · <a href="/wrapped?y=2026">2026</a></p>'), wrap_links(datetime(2026, 11, 20))
+        assert "Oct 2026</a>" in wrap_links(datetime(2027, 3, 1))
+        assert recap_month(datetime(2026, 11, 1)) == recap_month(datetime(2026, 11, 7)) == "2026-10" and recap_month(datetime(2026, 11, 8)) is None
+        assert recap_month(datetime(2027, 1, 3)) == "2026-12"
         assert page_wrapped({"m": ["2026-13"]}) is page_wrapped({"y": ["1999"]}) is None and wrap_span({"y": ["2026"]})[1] == datetime(2027, 1, 1).date()
         k = (D, datetime(2026, 11, 1).date(), SET["source"])   # cache: finished kept, partial kept for WRAP_TTL
         fin = WRAP[k] = (0, WRAP[k][1])

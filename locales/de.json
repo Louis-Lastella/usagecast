@@ -247,6 +247,7 @@
   "ov.save.hint": "Aus deinen echten Daten berechnet, die Prozente beziehen sich auf den gewählten Zeitraum.",
   "ov.nothing": "Gerade nichts Auffälliges.",
   "ov.push": "Push-Warnungen sind aus · <a href=\"{url}\">in 1 Minute einrichten</a>",
+  "ov.wrap": "Dein {month} im Rückblick",
   "ov.guard": "Budget-Wächter: {names} pausiert, bis die Woche wieder Luft hat.",
 
   "tip.share": "Das Tool macht {p} der Kosten aus.",
@@ -349,6 +350,7 @@
   "wrap.subs.unit": "Läufe",
   "wrap.subs": "Zusammen <strong>{cost}</strong>, {share} des API-Preises.",
   "wrap.type.k": "Dein Typ",
+  "wrap.vs": "{d} zu {p}",
   "wrap.months": ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember"],
 
   "det.tools": "Tools",

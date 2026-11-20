@@ -247,6 +247,7 @@
   "ov.save.hint": "Calculated from your real data. Percentages refer to the selected period.",
   "ov.nothing": "Nothing stands out right now.",
   "ov.push": "Push alerts are off · <a href=\"{url}\">set up in 1 minute</a>",
+  "ov.wrap": "Your {month} in review",
   "ov.guard": "Budget guard: {names} paused until the week has room again.",
 
   "tip.share": "The tool makes up {p} of the cost.",
@@ -349,6 +350,7 @@
   "wrap.subs.unit": "runs",
   "wrap.subs": "Worth <strong>{cost}</strong>, {share} of the API price.",
   "wrap.type.k": "Your type",
+  "wrap.vs": "{d} vs {p}",
   "wrap.months": ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"],
 
   "det.tools": "Tools",

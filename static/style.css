@@ -427,6 +427,7 @@ body.wr{height:100vh;height:100dvh;overflow:hidden}
 .big.wt{font-size:40px;line-height:1.08;letter-spacing:-.03em;overflow-wrap:anywhere;text-wrap:balance}
 .say{margin:0;max-width:34ch;font-size:17px;line-height:1.45;color:var(--ink2);text-wrap:pretty}
 .say strong{color:var(--ink)}
+.cmp{margin:-10px 0 14px;font-size:15px;color:var(--mute)}
 .say+.say,.wd+.say{margin-top:14px;font-size:15px;color:var(--mute)}
 .wb{list-style:none;margin:22px 0 0;padding:0;display:grid;gap:12px}
 .wb li{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:5px 12px;font-size:14.5px;color:var(--ink2)}
@@ -447,7 +448,7 @@ body.wr{height:100vh;height:100dvh;overflow:hidden}
 @keyframes wr-lit{from{background:var(--track);transform:scale(.5)}}
 .on .wk{animation:wr-in .4s var(--ease) both}.on .wsub{animation-delay:.7s}
 .on .big{animation:wr-in .5s var(--ease) .1s both}
-.on .say{animation:wr-in .5s var(--ease) .7s both}.on .say~.say{animation-delay:1.1s}
+.on .say,.on .cmp{animation:wr-in .5s var(--ease) .7s both}.on .say~.say{animation-delay:1.1s}
 .on .wb i{animation:wr-grow .7s var(--ease) var(--d) both}
 .on .wh i,.on .wd i.a{animation:wr-lit .3s var(--ease) var(--d) both}
 .on .wpet{animation:wr-in .6s var(--ease) 1.1s both}
