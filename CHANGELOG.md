@@ -2,6 +2,11 @@
 
 Versions follow [Semantic Versioning](https://semver.org).
 
+## 3.9.4 - 2026-11-20
+
+- Session page: Hermes cuts long subagent titles ("Subagent: Implement GitHub issue #12 of…"). Such a session now has
+  a "Full task" fold under its header with the whole task the subagent was given.
+
 ## 3.9.3 - 2026-11-20
 
 - Several accounts: an account Hermes was told to prefer (pool_preference.json, e.g. from a timer that switches

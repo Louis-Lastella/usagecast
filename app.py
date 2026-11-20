@@ -3125,6 +3125,8 @@ def page_session(sid, p):
             if d["sess"]:
                 kids, pid = subagents(c, sid, ttl), d["sess"][sid].get("parent")
                 ptitle = pid and (c.execute("select title from sessions where id = ?", (pid,)).fetchone() or [None])[0]
+                task = (d["sess"][sid]["title"] or "").endswith("…") and (c.execute(
+                    "select content from messages where session_id = ? and role = 'user' order by id limit 1", (sid,)).fetchone() or [None])[0]
                 break
     if not d["sess"]:
         return None
@@ -3160,7 +3162,8 @@ def page_session(sid, p):
 {table(["th.session", "th.steps", "th.cost", "th.share"], trs, ("", "", "", ""), "titles")}</section>
 """
     logged = tr("ses.logged", p=pc(d["logged"] / d["n_steps"] * 100)) if d["n_steps"] else ""
-    body = f"""<p class="hint">{tr("ses.resume")} <code class="cmd">hermes {pre}--resume {e(sid)}</code></p>
+    task = f'<details class="more task"><summary>{tr("ses.task")}</summary><p class="why">{e(task)}</p></details>' if task else ""
+    body = f"""{task}<p class="hint">{tr("ses.resume")} <code class="cmd">hermes {pre}--resume {e(sid)}</code></p>
 <section class="card"><h2>{tr("ses.eats")}</h2>
 {bars(ranked(d["comp"], group_skills=False), tot, ttl, explain=False, n=40)}</section>
 {ktab}<section class="sec"><h2>{tr("ses.steps_h")}</h2>
@@ -3882,7 +3885,8 @@ def selftest():
         HERMES, DATA = Path(tmp), Path(tmp) / "data"
         db, _ = test_db(time.time() - 3600)
         db.backup(disk := sqlite3.connect(Path(tmp) / "state.db"))
-        disk.execute("insert into sessions values ('k', 'subagent', 'Subagent: check', null, ?, null, 's')", (time.time() - 1800,))
+        disk.execute("insert into sessions values ('k', 'subagent', 'Subagent: check…', null, ?, null, 's')", (time.time() - 1800,))
+        disk.execute("insert into messages (session_id, role, content, timestamp) values ('k', 'user', 'check <all> of it', ?), ('k', 'assistant', 'ok', ?)", (time.time() - 1800, time.time() - 1700))
         disk.execute("insert into session_model_usage values ('k', 'claude-opus-5-5', '', 2, 10, 4000, 1000, 200, ?)", (time.time() - 1700,))
         for col in ("chat_id", "chat_type", "thread_id", "display_name", "origin_json"):
             disk.execute(f"alter table sessions add column {col}")
@@ -4220,6 +4224,7 @@ def selftest():
         kc = money(sum(row_cost("claude-opus-5-5", 10, 4000, 1000, 200, cache_ttl())))
         ps, pk, pl = page_session("s", "7"), page_session("k", "7"), page_sessions("7", {})
         assert "Subagent: check" in ps and 'href="/s/k?p=7"' in ps and kc in ps and "with subagents" in ps and "Subagents (delegate_<wbr>task)" in ps, ps
+        assert '<summary>Full task</summary><p class="why">check &lt;all&gt; of it</p>' in pk and "Full task" not in ps, pk
         assert 'started by <a href="/s/s?p=7">Test</a>' in pk and "with subagents" not in pk, pk
         assert f"subagents: 1 · {kc}" in pl and 'started by <a href="/s/s?p=7">' in pl, pl
         # Bots & chats: the overview folds the chats out per bot, the list filters by bot and chat, old src= links still work
@@ -4233,9 +4238,9 @@ def selftest():
         assert 'class="chats"' in po and f'<a href="{shop}"><span>Shop</span>' in po and ">Robo · Subagents<" in po, po   # one DM: no context
         assert ">Robo · Cron jobs<" in po and link("/sessions", p="7", bot=":cron", chat="cron:Daily report") in po
         pf = page_sessions("7", {"bot": [":telegram"], "chat": ["telegram:42:7"]})
-        assert "Only chat <b>Shop</b>" in pf and ">Test</a>" in pf and "Robo · Telegram · Shop" in pf and ">Subagent: check</a>" not in pf, pf
+        assert "Only chat <b>Shop</b>" in pf and ">Test</a>" in pf and "Robo · Telegram · Shop" in pf and ">Subagent: check…</a>" not in pf, pf
         pc_ = page_sessions("7", {"chat": ["telegram:42:7"]})
-        assert ">Test</a>" in pc_ and ">Subagent: check</a>" in pc_ and "Daily report" not in pc_   # the subagents of that chat too
+        assert ">Test</a>" in pc_ and ">Subagent: check…</a>" in pc_ and "Daily report" not in pc_   # the subagents of that chat too
         ps_ = page_sessions("7", {"src": ["cron"]})
         assert "Daily report" in ps_ and ">Test</a>" not in ps_ and "Daily report" in page_sessions("7", {"view": ["cron"], "bot": [":cron"]})
         assert "Robo · Telegram" in ps and ">Shop</a>" in ps

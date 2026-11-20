@@ -171,6 +171,7 @@ details.more>summary::after,details.bar>summary .row>span:first-child::after{con
 details.more[open]>summary::after,details.bar[open]>summary .row>span:first-child::after{transform:translateY(1px) rotate(-135deg)}
 details.more[open]>:not(summary),details.bar[open]>.why{animation:pop .22s var(--ease)}
 details.more .why{margin-top:8px}
+details.task{margin:-4px 0 14px}details.task .why{white-space:pre-wrap;overflow-wrap:anywhere;max-width:72ch}
 
 /* KPI strip */
 .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));margin-top:16px;background:var(--card);border-radius:var(--r);box-shadow:0 0 0 1px var(--line),0 1px 2px var(--shc);overflow:hidden}
