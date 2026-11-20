@@ -2538,9 +2538,9 @@ def warm():
     while True:
         now = f"{datetime.now():%Y-%m}"
         jobs = [(compute, p) for p in dict.fromkeys(("w", "30", SET["period"]))]
-        # /wrapped opens at once: this month (its previous one comes along) and this year, refreshed every round, so a
-        # page never finds them older than WRAP_TTL
-        jobs += [(wrapped, *wrap_span({"m": [now]}), 0), (wrapped, *wrap_span({"y": [now[:4]]}), 0)]
+        # /wrapped opens at once: this month (its previous one comes along) and this year, refreshed before they reach
+        # WRAP_TTL (a real year costs 20-60 s of CPU, so not every round)
+        jobs += [(wrapped, *wrap_span({"m": [now]}), WRAP_TTL - 900), (wrapped, *wrap_span({"y": [now[:4]]}), WRAP_TTL - 900)]
         for f, *a in jobs:
             try:
                 f(*a)
@@ -2601,7 +2601,7 @@ FOCUS = 0.6        # focus: the top project took at least this share of the API 
 STEADY = 0.8       # steady: messages on at least this share of the days
 WRAP_TYPES = ("edge", "conductor", "owl", "focus", "steady", "explorer")
 WRAP = {}          # (start, end, source) -> (time, wrap_period()); a month's analysis takes ~10 s
-WRAP_TTL = 600     # s; a running period is recomputed after this, a finished one stays
+WRAP_TTL = 3600    # s; a running period is recomputed after this, a finished one stays
 WRAPPING = {}      # (start, end, source) -> the thread computing wrapped() for the page
 WRAP_MOOD = {"edge": 100, "conductor": 60, "focus": 60}   # type -> 5 h use that puts the mascot at the limit or at work; else calm
 
