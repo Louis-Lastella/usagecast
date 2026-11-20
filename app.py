@@ -349,6 +349,8 @@ def num(n):
     n = float(n or 0)
     if SET["numbers"] == "full":
         return nf(n)
+    if n >= 1e9:
+        return tr("num.b", v=nf(n / 1e9, 1))
     if n >= 1e6:
         return tr("num.m", v=nf(n / 1e6, 1))
     return tr("num.k", v=nf(n / 1e3)) if n >= 1e3 else nf(n)
@@ -1904,7 +1906,7 @@ def snapshot():
 # ---------- HTML ----------
 e = html.escape
 STATIC = ROOT / "static"
-STATIC_FILES = {"style.css": "text/css; charset=utf-8", "haptics.js": "text/javascript; charset=utf-8", "app.js": "text/javascript; charset=utf-8", "manifest.webmanifest": "application/manifest+json",
+STATIC_FILES = {"style.css": "text/css; charset=utf-8", "haptics.js": "text/javascript; charset=utf-8", "app.js": "text/javascript; charset=utf-8", "wrapped.js": "text/javascript; charset=utf-8", "manifest.webmanifest": "application/manifest+json",
                 "icon.svg": "image/svg+xml", "icon-180.png": "image/png", "icon-192.png": "image/png", "icon-512.png": "image/png"}
 ICONS = {  # 24 grid, stroke in currentColor
     "/": '<path d="M4 16a8 8 0 1 1 16 0"/><path d="M12 16l3.5-4.5"/>',
@@ -2366,9 +2368,6 @@ def layout(title, active, p, h1, sub, body, tabs=True, keep=None, back=""):
     seg = f'<div class="periods"><nav class="seg" aria-label="{tr("aria.period")}">{seg}</nav>{rng}</div>' if tabs else ""
     foot = (tr("foot.limits", at=hm(STATE["ok"]) if STATE["ok"] else "–") + "<br>"
             + f'<a href="/settings/notify">{tr("foot.ntfy.on" if push_on() else "foot.ntfy.off")}</a>')
-    th = SET["theme"]
-    metas = "".join(f'<meta name="theme-color" content="{c}"' + (f' media="(prefers-color-scheme: {m})"' if th == "system" else "") + ">"
-                    for m, c in (("light", "#f7f6f4"), ("dark", "#141312")) if th in ("system", m))
     u = urlparse(getattr(_req, "url", "/"))
     q = {k: v[0] for k, v in parse_qs(u.query).items()}
     langs = []
@@ -2376,8 +2375,20 @@ def layout(title, active, p, h1, sub, body, tabs=True, keep=None, back=""):
         q["lang"] = code
         on = " class=on aria-current=true" if code == lang() else ""
         langs.append(f'<a href="{e(link(u.path, **q))}" hreflang="{code}" lang="{code}"{on}>{LOC[code]["lang.name"]}</a>')
+    return head(title) + f"""<body><div class="app"><aside><a class="brand" href="{link("/", p=p)}"><span class="logo">{LOGO}</span><span>Usagecast</span></a>
+<nav aria-label="{tr("aria.pages")}">{nav}</nav><div class="foot">{foot}</div></aside>
+<main><header class="top"><div>{back}<h1>{h1}</h1><p class="sub">{sub}</p></div>{seg}{gear}</header>
+{body}
+<footer class="pf"><nav aria-label="{tr("aria.lang")}">{" · ".join(langs)}</nav><a href="{REPO_URL}">Usagecast {VERSION}</a></footer></main></div></body></html>"""
+
+
+def head(title, extra=""):
+    """<head> of every page: theme, zoom lock, scripts and styles (cache buster = newest static file), app icons."""
+    th = SET["theme"]
+    metas = "".join(f'<meta name="theme-color" content="{c}"' + (f' media="(prefers-color-scheme: {m})"' if th == "system" else "") + ">"
+                    for m, c in (("light", "#f7f6f4"), ("dark", "#141312")) if th in ("system", m))
     try:
-        v = int(max((STATIC / n).stat().st_mtime for n in ("style.css", "haptics.js", "app.js")))
+        v = int(max((STATIC / n).stat().st_mtime for n in ("style.css", "haptics.js", "app.js", "wrapped.js")))
     except OSError:
         v = 0
     theme = f' data-theme="{th}"' if th != "system" else ""
@@ -2389,12 +2400,8 @@ def layout(title, active, p, h1, sub, body, tabs=True, keep=None, back=""):
 <link rel="apple-touch-icon" href="/icon-180.png"><link rel="manifest" href="/manifest.webmanifest">
 <meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Usagecast">
-{metas}</head>
-<body><div class="app"><aside><a class="brand" href="{link("/", p=p)}"><span class="logo">{LOGO}</span><span>Usagecast</span></a>
-<nav aria-label="{tr("aria.pages")}">{nav}</nav><div class="foot">{foot}</div></aside>
-<main><header class="top"><div>{back}<h1>{h1}</h1><p class="sub">{sub}</p></div>{seg}{gear}</header>
-{body}
-<footer class="pf"><nav aria-label="{tr("aria.lang")}">{" · ".join(langs)}</nav><a href="{REPO_URL}">Usagecast {VERSION}</a></footer></main></div></body></html>"""
+{metas}{extra}</head>
+"""
 
 
 CACHE, LOCK = {}, threading.Lock()
@@ -2529,9 +2536,14 @@ def data_for(p):
 def warm():
     """Keeps the periods of the overview precomputed, so no page load waits for the analysis."""
     while True:
-        for p in dict.fromkeys(("w", "30", SET["period"])):
+        now = f"{datetime.now():%Y-%m}"
+        jobs = [(compute, p) for p in dict.fromkeys(("w", "30", SET["period"]))]
+        # /wrapped opens at once: this month (its previous one comes along) and this year, refreshed every round, so a
+        # page never finds them older than WRAP_TTL
+        jobs += [(wrapped, *wrap_span({"m": [now]}), 0), (wrapped, *wrap_span({"y": [now[:4]]}), 0)]
+        for f, *a in jobs:
             try:
-                compute(p)
+                f(*a)
             except Exception as e:  # noqa: BLE001 - keep warming, the page computes on demand anyway
                 print("warm:", e, flush=True)
         time.sleep(300)
@@ -2588,7 +2600,10 @@ NIGHT_OWL = 0.2    # owl: at least this share of the messages came at night
 FOCUS = 0.6        # focus: the top project took at least this share of the API price
 STEADY = 0.8       # steady: messages on at least this share of the days
 WRAP_TYPES = ("edge", "conductor", "owl", "focus", "steady", "explorer")
-WRAP = {}          # finished periods: (start, end, source) -> wrap_period(); a month's analysis takes ~10 s
+WRAP = {}          # (start, end, source) -> (time, wrap_period()); a month's analysis takes ~10 s
+WRAP_TTL = 600     # s; a running period is recomputed after this, a finished one stays
+WRAPPING = {}      # (start, end, source) -> the thread computing wrapped() for the page
+WRAP_MOOD = {"edge": 100, "conductor": 60, "focus": 60}   # type -> 5 h use that puts the mascot at the limit or at work; else calm
 
 
 def wrap_type(w):
@@ -2618,20 +2633,22 @@ def limit_moments(a, b):
                 switches=sum(x != y for x, y in zip(seq, seq[1:])))
 
 
-def wrapped(start, end):
-    """Everything the Wrapped slides show for the dates [start, end), a month or a year; a running one is `partial`.
-    prev = the same for the month or year before, None without sessions there."""
+def wrapped(start, end, ttl=WRAP_TTL):
+    """Everything the Wrapped slides show for the dates [start, end), a month or a year; a running one is `partial` and
+    is recomputed when its cache is older than ttl seconds. prev = the same for the month or year before,
+    None without sessions there."""
     ps = start.replace(year=start.year - 1) if (end - start).days > 31 else (start - timedelta(days=1)).replace(day=1)
     p = wrap_period(ps, start)
-    return {**wrap_period(start, end), "prev": p if p["sessions"] else None}
+    return {**wrap_period(start, end, ttl), "prev": p if p["sessions"] else None}
 
 
-def wrap_period(start, end):
+def wrap_period(start, end, ttl=WRAP_TTL):
     """wrapped() without prev. Ranked lists are top first, [name, value, share]; messages, hours (24 counts by local
     hour), days (count per day so far) and the streak count chat messages, no cron or subagent runs."""
     key = (start, end, SET["source"])
-    if key in WRAP:
-        return WRAP[key]
+    hit = WRAP.get(key)
+    if hit and (not hit[1]["partial"] or time.time() - hit[0] < ttl):
+        return hit[1]
     a, b = (datetime.combine(x, datetime.min.time()).timestamp() for x in (start, end))
     d = data_for(f"{start}..{end - timedelta(days=1)}")
     tot, sess = d["total"], d["sess"]
@@ -2669,9 +2686,116 @@ def wrap_period(start, end):
              limits=limit_moments(a, b),
              subagents=dict(n=len(subs), cost=sum(x["cost"] for x in subs), models=top(Counter(x["models"][0] for x in subs if x["models"]), len(subs))))
     w["type"] = wrap_type(w)
-    if not w["partial"]:   # ponytail: kept until a restart; a finished month only changes if Hermes rewrites old rows
-        WRAP[key] = w
+    WRAP[key] = (time.time(), w)   # ponytail: finished ones kept until a restart; they only change if Hermes rewrites old rows
     return w
+
+
+def wrap_span(q):
+    """(start, end) dates of ?m=YYYY-MM or ?y=YYYY (this month without either), None for anything else."""
+    m, y = (q.get(k, [""])[0] for k in ("m", "y"))
+    try:
+        s = datetime.strptime(y, "%Y").date() if y else datetime.strptime(m or f"{datetime.now():%Y-%m}", "%Y-%m").date()
+    except ValueError:
+        return None
+    if not 2000 <= s.year < 2100:
+        return None
+    return s, s.replace(year=s.year + 1) if y else (s + timedelta(days=32)).replace(day=1)
+
+
+def wrap_ready(start, end):
+    """wrapped() when it is cached or done within 2 s, else None while a thread computes it (a cold month takes 10-20 s)."""
+    k = (start, end, SET["source"])
+    with LOCK:
+        t = WRAPPING.get(k)
+        if not (t and t.is_alive()):
+            t = WRAPPING[k] = threading.Thread(target=wrapped, args=(start, end), daemon=True)
+            t.start()
+    t.join(2)
+    return None if t.is_alive() else wrapped(start, end)
+
+
+def wbars(items):
+    """Ranked bars on a slide: (name, value text, size), top first; widths relative to the top one."""
+    top = max((s for *_, s in items), default=0) or 1
+    return '<ul class="wb">' + "".join(f'<li><span>{e(k)}</span><b>{v}</b><i style="--w:{max(2, s / top * 100):.0f}%;--d:{800 + 90 * j}ms"></i></li>'
+                                       for j, (k, v, s) in enumerate(items)) + "</ul>"
+
+
+def wdays(days, start, yr):
+    """Active days as dots: a month in rows of 7, a year as one row of 31 per month."""
+    cells, k, n = [], 0, max(1, sum(map(bool, days)))
+    for i, c in enumerate(days):
+        if yr and i and (start + timedelta(days=i)).day == 1:
+            cells += ['<i class="x"></i>'] * (-len(cells) % 31)
+        k += bool(c)
+        cells.append(f'<i class="a" style="--d:{800 + 700 * k // n}ms"></i>' if c else "<i></i>")
+    return f'<div class="wd{" y" if yr else ""}">{"".join(cells)}</div>'
+
+
+def page_wrapped(q):
+    """/wrapped?m=YYYY-MM or ?y=YYYY: the period as full-screen story slides (static/wrapped.js moves and animates them)."""
+    span = wrap_span(q)
+    if not span:
+        return None
+    start, end = span
+    yr, T, w = (end - start).days > 31, lambda k, **kw: tr("wrap." + k, **kw), wrap_ready(start, end)
+    name = str(start.year) if yr else f'{LOC[lang()]["wrap.months"][start.month - 1]} {start.year}'
+    big = lambda v, unit="": f'<div class="big"><b class="up">{v}</b><span>{unit}</span></div>'
+    word = lambda v: f'<div class="big wt">{e(v)}</div>'
+    say = lambda *x: "".join(f'<p class="say">{s}</p>' for s in x if s)
+    S = []
+    if w is None:
+        S.append(word(T("loading")) + say(T("loading.why")))
+    elif not w["sessions"]:
+        S.append(word(T("empty")) + say(T("empty.why")))
+    else:
+        S.append(f'<p class="wk">{T("total.k")}</p>' + big(num(w["tokens"]), T("tokens"))
+                 + say(T("totals", cost=cash(w["cost"]), sessions=cnt(w["sessions"]), messages=cnt(w["messages"]))))
+        if w["projects"]:
+            S.append(f'<p class="wk">{T("project.k")}</p>' + word(proj_label(w["projects"][0][0])) + say(T("project", share=pc(w["projects"][0][2] * 100)))
+                     + wbars([(proj_label(k), pc(s * 100), s) for k, _, s in w["projects"]]))
+        if w["tools"]:
+            t0 = w["tools"][0]
+            S.append(f'<p class="wk">{T("tool.k")}</p>' + word(t0[0]) + say(T("tool", n=cnt(t0[1]), share=pc(t0[2] * 100)))
+                     + wbars([(k, cnt(n), n) for k, n, _ in w["tools"][:3]])
+                     + (f'<p class="wk wsub">{T("models")}</p>' + wbars([(k, pc(s * 100), s) for k, _, s in w["models"][:3]]) if w["models"] else ""))
+        if w["peak_hour"] is not None:
+            mx, hs = max(w["hours"]), w["hours"]
+            heat = "".join(f'<i style="--d:{800 + 25 * h}ms;background:var(--h{math.ceil(c / mx * 4)})"></i>' for h, c in enumerate(hs))
+            axis = "".join(f'<span>{tr("fmt.hour", h=h)}</span>' for h in (0, 6, 12, 18))
+            S.append(f'<p class="wk">{T("peak.k")}</p>' + word(tr("fmt.hour", h=w["peak_hour"]))
+                     + say(T("night", share=pc(w["night"] * 100)) + (" " + T("latest", t=when(w["latest"], "short")) if w["latest"] else ""))
+                     + f'<div class="wh">{heat}</div><div class="axis">{axis}</div>')
+        if any(w["days"]):
+            b = w["biggest"]
+            S.append(f'<p class="wk">{T("streak.k")}</p>' + big(cnt(w["streak"]), T("day" if w["streak"] == 1 else "days"))
+                     + say(T("active", n=cnt(sum(map(bool, w["days"]))), of=cnt(len(w["days"]))))
+                     + wdays(w["days"], start, yr)
+                     + say(b and T("biggest", title=e(b["title"] or tr("untitled")), tokens=num(b["tokens"]), cost=cash(b["cost"]))))
+        L = w["limits"]
+        if L["tightest"]:
+            S.append(f'<p class="wk">{T("limits.k")}</p>' + big(cnt(sum(L["hits"].values())), T("times"))
+                     + say(T("hits", five=cnt(L["hits"]["five_hour"]), week=cnt(L["hits"]["seven_day"])),
+                           T("tightest", used=pc(L["tightest"]["used"]), day=when(L["tightest"]["t"], "day"))
+                           + (" " + T("switches", n=cnt(L["switches"])) if L["switches"] else "")))
+        if w["subagents"]["n"]:
+            sa = w["subagents"]
+            S.append(f'<p class="wk">{T("subs.k")}</p>' + big(cnt(sa["n"]), T("subs.unit"))
+                     + say(T("subs", cost=cash(sa["cost"]), share=pc(sa["cost"] / (w["cost"] or 1) * 100)))
+                     + wbars([(k, cnt(n), n) for k, n, _ in sa["models"][:3]]))
+        S.append(f'<p class="wk">{T("type.k")}</p>' + word(tr("wrap.type." + w["type"])) + say(tr("wrap.type." + w["type"] + ".why"))
+                 + f'<div class="wpet">{pet_html([("five_hour", WRAP_MOOD.get(w["type"], 20), None)], True)}</div>')
+    n = len(S)
+    slides = "".join(f'<section class="ws" id="s{i}" aria-label="{i + 1} / {n}"><nav class="tz"><a class="prev" href="#s{max(i - 1, 0)}" aria-label="{T("back")}"></a>'
+                     f'<a class="next" href="#s{min(i + 1, n - 1)}" aria-label="{T("next")}"></a></nav>{x}</section>' for i, x in enumerate(S))
+    prog = "".join(f'<i{" class=on" if not i else ""}></i>' for i in range(n))
+    title = name + (f' · {T("sofar")}' if end > datetime.now().date() else "")
+    return (head(f'{T("title")} · {name}', "" if w else '<meta http-equiv="refresh" content="3">')
+            + f'<body class="wr"><div class="wcol"><div class="prog" aria-hidden="true">{prog}</div>'
+            f'<nav class="whead" aria-label="{T("title")}"><span>{title}</span><a class="wx" href="/" aria-label="{T("close")}">'
+            f'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></a></nav>'
+            f'<div class="story" data-sep="{tr("num.sep")}">{slides}</div></div>'
+            f'<script type="module" src="/wrapped.js?v={int((STATIC / "wrapped.js").stat().st_mtime)}"></script></body></html>')
 
 
 def page_overview(p):
@@ -3532,6 +3656,8 @@ class Handler(BaseHTTPRequestHandler):
                 body = page_session(unquote(path[3:]), p)
             elif path == "/settings" or path.startswith("/settings/") and path[10:] in SECTIONS:
                 body = page_settings(q, path[10:])
+            elif path == "/wrapped":
+                body = page_wrapped(q)
             elif path == "/live":
                 return self.send(live_card(live(), p).encode(), "text/html; charset=utf-8")
             elif path == "/api/summary":
@@ -3856,8 +3982,30 @@ def selftest_wrapped():
         assert wrap_type({**w, "limits": {"hits": {"five_hour": 3}}}) == "edge" and wrap_type({**w, "subagents": {"cost": w["cost"]}}) == "conductor"
         assert wrap_type({**w, "night": 0.5}) == "owl" and wrap_type({**w, "projects": [], "days": [1, 1, 1, 1, 0]}) == "steady"
         assert wrap_type({**w, "projects": [], "days": [1, 0, 0]}) == "explorer"
+        for code in LOC:   # the slides: every one for the demo month, one calm slide for an empty month, none for junk
+            _req.lang = code
+            pg, em = page_wrapped({"m": ["2026-10"]}), page_wrapped({"m": ["2026-08"]})
+            text = re.sub(r"<[^>]+>", " ", pg + em + page_wrapped({"y": ["2026"]}))
+            assert pg.count('<section class="ws"') == 7 and em.count('<section class="ws"') == 1 and tr("wrap.empty") in em, (pg, em)
+            assert "{" not in text and "wrap." not in text and 'class="pet"' in pg and "refresh" not in pg, text
+        assert page_wrapped({"m": ["2026-13"]}) is page_wrapped({"y": ["1999"]}) is None and wrap_span({"y": ["2026"]})[1] == datetime(2027, 1, 1).date()
+        k = (D, datetime(2026, 11, 1).date(), SET["source"])   # cache: finished kept, partial kept for WRAP_TTL
+        fin = WRAP[k] = (0, WRAP[k][1])
+        part = {**fin[1], "partial": True}
+        assert wrap_period(*k[:2]) is fin[1]
+        WRAP[k] = (time.time(), part)
+        assert wrap_period(*k[:2]) is part and wrap_period(*k[:2], 0) is not part   # warm() refreshes with ttl 0
+        WRAP[k] = (time.time(), part)
+        WRAP[k] = (time.time() - WRAP_TTL - 1, part)
+        assert wrap_period(*k[:2]) is not part and not WRAP[k][1]["partial"]
+        busy = threading.Event()   # a cold period: the page answers with a slide that reloads itself
+        WRAPPING[k] = threading.Thread(target=busy.wait, daemon=True)
+        WRAPPING[k].start()
+        cold = page_wrapped({"m": ["2026-10"]})
+        busy.set()
+        assert 'http-equiv="refresh"' in cold and tr("wrap.loading") in cold, cold
     HERMES, DATA = old
-    CACHE.clear(); WRAP.clear()
+    CACHE.clear(); WRAP.clear(); WRAPPING.clear()
 
 
 def selftest():
