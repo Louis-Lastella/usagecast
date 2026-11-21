@@ -2,6 +2,11 @@
 
 Versions follow [Semantic Versioning](https://semver.org).
 
+## 3.11.1 - 2026-11-21
+
+- iPhone: tapping a tab or link vibrates again. Since 3.11.0 the page was swapped while the tap was still running,
+  which cancelled the vibration and made Safari load the whole page anyway.
+
 ## 3.11.0 - 2026-11-21
 
 - Instant page switches: a tap on a tab, period, chip or row swaps the page in place instead of loading it. The last

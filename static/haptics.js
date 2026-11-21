@@ -49,7 +49,9 @@ function label() {
     tap.htmlFor = "haptic"
     tap.setAttribute("aria-hidden", "true")
     tap.style.cssText = "position:absolute;inset:0"
-    tap.addEventListener("click", e => { e.stopPropagation(); el.click() })
+    // el.click() only after the label's own click is done: a page link swaps the page at once (static/app.js), and a
+    // label that has left the page no longer toggles the switch (no vibration) and lets the link load the page.
+    tap.addEventListener("click", e => { e.stopPropagation(); setTimeout(() => el.click()) })
     host.append(tap)
   }
 }
