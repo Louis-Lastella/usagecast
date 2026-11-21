@@ -1,3 +1,5 @@
+// The page exactly as the server sent it, before the labels below change it: static/app.js keeps it in its page cache.
+window.ucPage = document.documentElement.outerHTML
 // A short vibration when a control is tapped: tabs, period and filter chips, buttons, folds, settings switches.
 // iOS Safari has no Vibration API, but its <input type=checkbox switch> vibrates when it is toggled through a label
 // the finger really touched (a script .click() stopped counting with iOS 26.5). So on iOS every control gets a
@@ -25,8 +27,14 @@ if (tg) {
   sw.style.cssText = "position:fixed;top:0;left:0;width:1px;height:1px;margin:0;visibility:hidden"
   sw.addEventListener("click", e => e.stopPropagation())
   document.body.append(sw)
+  label()
+  addEventListener("uc:swap", label)   // static/app.js swapped in a new page
+}
+
+function label() {
   for (const el of document.querySelectorAll(SEL)) {
-    if (el.disabled) continue
+    if (el.disabled || el.hap) continue
+    el.hap = 1
     // A radio is covered with its label (the label is the visible segment). Buttons and bare switches get a wrapper and
     // the label goes next to them, not inside: a tap on a label inside a button still submits in Chromium.
     let host = el.type === "radio" ? el.closest("label") : el.matches("a, summary") ? el : null

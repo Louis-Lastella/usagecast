@@ -61,6 +61,10 @@ oder Bot. Er folgt dem 5-Stunden-Fenster (ohne eins der Woche) und hat vier Stim
 ist: ruhig, beschäftigt ab 50 %, knapp ab 85 % (oder knappe Prognose) und schlafend am Limit. Kaffeestand und Bot-Akku zeigen, was übrig ist. Er folgt hell und
 dunkel und steht still bei reduzierter Bewegung. Auswählen oder ausschalten unter Einstellungen > Darstellung.
 
+**Sofortiger Wechsel:** Tabs, Zeiträume und Zeilen tauschen die Seite an Ort und Stelle. Die letzten 30 Seiten bleiben
+auf dem Gerät und erscheinen sofort, dann frischen sie sich leise auf; eine noch nicht gesehene Seite zeigt beim Laden
+Platzhalter-Blöcke.
+
 ## Wrapped
 
 `/wrapped?m=2026-10` (ein Monat) oder `/wrapped?y=2026` (ein Jahr) zeigt deine Nutzung als Story-Folien im Vollbild, per

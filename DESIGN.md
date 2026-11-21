@@ -53,6 +53,9 @@ limit number 80/600 (-0.04em) · KPI 26/600. Labels are sentence case, never upp
   Exception: the Wrapped slides (`/wrapped`) play once each time a slide comes into view, 150-900 ms: numbers count up,
   lines fade in, bars grow, the hour heatmap fills and the active days light up. Nothing on them loops except the
   mascot, and reduced motion shows every slide in its end state.
+  Exception: while a page that is not on the device yet loads (after 150 ms), `main` shows bones: neutral blocks in
+  the shape of the header and cards (`--line2`, `--line`, `--track` on `.card`) that pulse softly (1.4 s); reduced
+  motion keeps them still.
   Exception: the mascot beside the big weekly number (`pets.py`, setting `pet`) loops quietly (1-4 s) to show its mood
   (calm, agent working, tight, at the limit); its colors are the `--pet-*` tokens, and reduced motion stops it too.
 - Haptics: a tapped control (tab, chip, button, fold, switch) gives a short vibration, `static/haptics.js`. iOS has no

@@ -2537,7 +2537,9 @@ def warm():
     """Keeps the periods of the overview precomputed, so no page load waits for the analysis."""
     while True:
         now = f"{datetime.now():%Y-%m}"
-        jobs = [(compute, p) for p in dict.fromkeys(("w", "30", SET["period"]))]
+        # 24 h and 7 days hourly (a cold 7 days took ~7 s); a page load in between refreshes them anyway
+        hourly = [p for p in ("1", "7") if time.time() - CACHE.get(p, (0,))[0] > 3300]
+        jobs = [(compute, p) for p in dict.fromkeys(("w", "30", SET["period"], *hourly))]
         # /wrapped opens at once: this month (its previous one comes along) and this year, refreshed before they reach
         # WRAP_TTL (a real year costs 20-60 s of CPU, so not every round)
         jobs += [(wrapped, *wrap_span({"m": [now]}), WRAP_TTL - 900), (wrapped, *wrap_span({"y": [now[:4]]}), WRAP_TTL - 900)]
@@ -4563,6 +4565,7 @@ def selftest():
                          page_settings({"bad": ["quiet_from,url"]}, "alerts")]:
                 text = re.sub(r"<[^>]+>", " ", page)
                 assert not leftover.search(text) and "{" not in text, (code, leftover.search(text), text[:300])
+                assert page.count('<div class="app">') == 1, "static/app.js swaps this element on page switches"
         # Subagents: the chat lists them with their real cost, the subagent links back, the list shows both ways
         _req.lang = "en"
         kc = money(sum(row_cost("claude-opus-5-5", 10, 4000, 1000, 200, cache_ttl())))

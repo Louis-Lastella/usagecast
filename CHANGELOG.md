@@ -2,6 +2,15 @@
 
 Versions follow [Semantic Versioning](https://semver.org).
 
+## 3.11.0 - 2026-11-21
+
+- Instant page switches: a tap on a tab, period, chip or row swaps the page in place instead of loading it. The last
+  30 pages stay on the device, a cached page shows at once and refreshes silently (scroll and open folds stay), a page
+  that is not cached yet shows soft placeholder blocks after 150 ms. The main tabs are fetched ahead in the background.
+  Back/forward, the Telegram back button, haptics and the account fold follow along; Wrapped, settings and language
+  links still load normally, and anything unexpected falls back to a normal page load.
+- The 24-hour and 7-day periods are computed in the background once an hour, so they are never cold.
+
 ## 3.10.0 - 2026-11-20
 
 - Wrapped: `/wrapped?m=2026-10` or `/wrapped?y=2026` sums a month or a year up as full-screen story slides (tap or

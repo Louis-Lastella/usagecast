@@ -62,6 +62,9 @@ follows the 5-hour window (the week if your plan has none) and shows four moods 
 tight from 85 % (or a tight forecast) and asleep at the limit. Coffee level and bot battery show what is left. It follows light and dark
 mode and stands still with reduced motion. Pick one or turn it off under Settings > Appearance.
 
+**Instant switches:** Tabs, periods and rows swap the page in place. The last 30 pages stay on the device and show at
+once, then refresh quietly; a page not seen yet shows placeholder blocks while it loads.
+
 ## Wrapped
 
 `/wrapped?m=2026-10` (a month) or `/wrapped?y=2026` (a year) plays your usage as full-screen story slides, tap or swipe
