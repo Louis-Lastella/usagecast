@@ -172,7 +172,7 @@ function show(h, y, keep) {
   document.querySelector(".app").replaceWith(document.adoptNode(d.querySelector(".app")))
   document.querySelectorAll("main details").forEach((x, i) => { if (i < open.length) x.open = open[i] })
   const a = document.getElementById("accts")   // its inline script does not run in a swapped page
-  try { if (a && localStorage.accts) a.open = true } catch (e) {}
+  try { if (a) a.open = !!localStorage.accts } catch (e) {}   // the cached copy may carry an old open state
   if (y) scrollTo(0, y)
   backButton()
   dispatchEvent(new Event("uc:swap"))
