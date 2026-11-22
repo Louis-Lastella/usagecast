@@ -66,7 +66,7 @@ small JSON file, `$HERMES_HOME/progress/<name>.json`:
 All fields but `title` are optional. Share = (done + frac) / total, or frac alone; the time left comes from the rate
 since `started`. When `pid` is the background process or runs under it, the file fills that row, else it gets its own
 row while `pid` lives (without a pid: up to 30 min after the last write). `state` done/failed, a finished `total` or a
-dead `pid` show as Done/Failed/Stopped for 15 minutes. `image` (png/jpg/webp, max 5 MB) shows as a thumbnail.
+dead `pid` show as Done/Failed/Stopped for 15 minutes. `image` (png/jpg/webp, max 5 MB) shows as a thumbnail, and in full width on the page of the session that started the job.
 `tools/progress.py` writes these files, so scripts need no JSON of their own:
 
 ```sh

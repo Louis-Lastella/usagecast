@@ -66,7 +66,7 @@ Außer `title` ist alles optional. Anteil = (done + frac) / total, sonst frac al
 seit `started`. Ist `pid` der Hintergrundprozess oder läuft darunter, füllt die Datei dessen Zeile, sonst bekommt sie
 eine eigene, solange `pid` lebt (ohne pid: bis 30 Min. nach dem letzten Schreiben). `state` done/failed, ein erreichtes
 `total` oder eine tote `pid` stehen 15 Minuten als Fertig/Fehlgeschlagen/Abgebrochen da. `image` (png/jpg/webp, max.
-5 MB) erscheint als Vorschaubild. `tools/progress.py` schreibt diese Dateien, Skripte brauchen also kein eigenes JSON:
+5 MB) erscheint als Vorschaubild und groß auf der Seite der Session, die den Job gestartet hat. `tools/progress.py` schreibt diese Dateien, Skripte brauchen also kein eigenes JSON:
 
 ```sh
 python3 tools/progress.py set render --title "Nahansichten" --total 28 --done 9 --step tisch-abend --pid $$

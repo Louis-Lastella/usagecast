@@ -402,6 +402,7 @@
   "ses.subs": "subagents: {n} · {cost}",
   "ses.with_subs": "{cost} with subagents",
   "ses.subs_h": "Subagents",
+  "ses.jobs_h": "Background jobs",
   "ses.subs.hint": "Started from this session: {n}, together {cost} ({p} of the session with them). Each one has its own page.",
   "brk.shrunk": "history shortened",
   "brk.shrunk.why": "The prompt got smaller: Hermes removed or rewrote older history, so everything after it was written anew.",

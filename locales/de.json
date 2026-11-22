@@ -402,6 +402,7 @@
   "ses.subs": "Subagenten: {n} · {cost}",
   "ses.with_subs": "{cost} mit Subagenten",
   "ses.subs_h": "Subagenten",
+  "ses.jobs_h": "Hintergrundjobs",
   "ses.subs.hint": "Aus dieser Session gestartet: {n}, zusammen {cost} ({p} der Session samt Subagenten). Jeder hat eine eigene Seite.",
   "brk.shrunk": "Verlauf gekürzt",
   "brk.shrunk.why": "Der Prompt wurde kleiner: Hermes hat älteren Verlauf entfernt oder umgeschrieben, alles danach wurde neu geschrieben.",

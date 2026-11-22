@@ -2,6 +2,12 @@
 
 Versions follow [Semantic Versioning](https://semver.org).
 
+## 3.14.0 - 2026-11-22
+
+- A background job's row opens the session that started it, and that page now shows the job with its last image in
+  full card width. `tools/progress.py` keeps a 1280 px preview (was 480 px).
+- The thumbnail in Right now reloads only when the image changes, not on every refresh while a job reports progress.
+
 ## 3.13.1 - 2026-11-22
 
 - `tools/progress.py set --state running` restarts the job's clock, so a job file that is reused for the next run

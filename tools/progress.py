@@ -10,7 +10,7 @@
 One small JSON file per job: $HERMES_HOME/progress/NAME.json (HERMES_HOME defaults to ~/.hermes). `set` changes only
 the given fields (`--state running` also restarts the clock for the time-left estimate), so a batch script (done/total/step) and a filter (frac/detail) can write the same file.
 `blender` parses Cycles 'Sample a/b' and Eevee 'Rendering a / b samples' lines, writes frac + detail at most once a
-second and passes every other line through unchanged. --image stores a 480 px jpeg thumbnail if Pillow is installed.
+second and passes every other line through unchanged. --image stores a 1280 px jpeg thumbnail if Pillow is installed.
 Standard library only (Pillow optional), Python 3.9 or later.
 """
 import argparse, codecs, json, os, re, sys, tempfile, time
@@ -45,7 +45,7 @@ def thumb(src, dst):
         from PIL import Image
         with Image.open(src) as im:
             im = im.convert("RGB")
-            im.thumbnail((480, 480))
+            im.thumbnail((1280, 1280))
             atomic(dst, lambda f: im.save(f, "JPEG", quality=82))
         return str(dst)
     except Exception:
@@ -182,10 +182,10 @@ def test():
             print("skip thumbnail: no Pillow", file=sys.stderr)
         else:
             png = Path(tmp) / "big.png"
-            Image.new("RGB", (1000, 500), "red").save(png)
+            Image.new("RGB", (2000, 1000), "red").save(png)
             update("t", 1.0, image=str(png))
             t = rd("t")["image"]
-            assert t.endswith("t.thumb.jpg") and Image.open(t).size == (480, 240), t
+            assert t.endswith("t.thumb.jpg") and Image.open(t).size == (1280, 640), t
             Path(png).write_bytes(b"nope")  # unreadable image: stored as is
             update("t", 2.0, image=str(png))
             assert rd("t")["image"] == str(png)

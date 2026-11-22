@@ -2072,7 +2072,11 @@ def jobs(now=None, hs=None):
                     break
                 seen.add(pid)
                 pid = (proc(pid) or (0,))[0]
-            g = dict(g, name=f.stem, end=end, at=at, share=1.0 if end == "done" else job_share(g))
+            try:
+                iv = int(Path(g["image"]).stat().st_mtime) if isinstance(g.get("image"), str) else None
+            except OSError:
+                iv = None
+            g = dict(g, name=f.stem, end=end, at=at, iv=iv, share=1.0 if end == "done" else job_share(g))
             if host:
                 host["prog"] = g
             else:
@@ -2144,6 +2148,25 @@ def live(now=None, hs=None):
     return dict(runs=runs, n=sum(r["src"] != "subagent" for r in runs), up=up, down=down, next=sorted(nxt)[:3], at=now, jobs=jobs(now, hs))
 
 
+def job_row(j, p, now, big=False):
+    """One background job: title, bot · chat, step, runtime, time left, bar and share. Small: a thumbnail and a link to
+    the session that started it (Right now). big: on that session's page, the last image in full card width instead."""
+    g = j["prog"] or {}
+    sh, end = g.get("share"), g.get("end")
+    left = (now - float(g.get("started") or j["since"])) * (1 - sh) / sh if not end and sh and 0.02 <= sh < 1 else None
+    meta = [e(bot_chat(j)) if j["owner"] and j["chat"] else "", e(str(g.get("step") or "")[:60]),
+            e(str(g.get("detail") or "")[:40]), "" if end else tr("live.for", d=dur(now - j["since"])),
+            tr("live.left", d=dur(left)) if left else ""]
+    src = f'/job/{quote(g["name"])}.img?a={quote(j["agent"])}&amp;v={g["iv"]}' if g.get("iv") else ""
+    img = f'<img class="thumb" src="{src}" alt="" loading="lazy">' if src and not big else ""
+    bar = f'<span class="meter{" hot" if end in ("failed", "stopped") else ""}"><i style="width:{sh * 100:.1f}%"></i></span>' if sh is not None else ""
+    v = tr(f"live.job.{end}") if end else f"{nf(sh * 100)} %" if sh is not None else ""
+    tag, href = ("a", f' href="/s/{quote(j["owner"])}?p={e(p)}"') if j["owner"] and not big else ("div", "")
+    return (f'<{tag} class="job bg"{href}>{img}<span class="run"><span class="fname">{e(str(g.get("title") or j["cmd"])[:70])}</span>'
+            f'<span class="why">{" · ".join(x for x in meta if x)}</span>{bar}</span><span class="v{" hot" if end in ("failed", "stopped") else ""}">{v}</span></{tag}>'
+        + (f'<img class="shot" src="{src}" alt="{e(str(g.get("title") or ""))}">' if src and big else ""))
+
+
 def live_card(L, p):
     """"Right now" on the overview: who works on what, for how long, and what that session has cost so far. /live
     serves the card alone; static/app.js swaps it every few seconds while the page is in view."""
@@ -2159,21 +2182,6 @@ def live_card(L, p):
                 f'<span class="why">{" · ".join(x for x in meta if x)}</span></span><span class="v">{money(r["cost"])}</span></a>'
                 + "".join(row(k, " sub") for k in kids[r["id"]]))
 
-    def job(j):
-        g = j["prog"] or {}
-        sh, end = g.get("share"), g.get("end")
-        left = (L["at"] - float(g.get("started") or j["since"])) * (1 - sh) / sh if not end and sh and 0.02 <= sh < 1 else None
-        meta = [e(bot_chat(j)) if j["owner"] and j["chat"] else "", e(str(g.get("step") or "")[:60]),
-                e(str(g.get("detail") or "")[:40]), "" if end else tr("live.for", d=dur(L["at"] - j["since"])),
-                tr("live.left", d=dur(left)) if left else ""]
-        img = (f'<img class="thumb" src="/job/{quote(g["name"])}.img?a={quote(j["agent"])}&amp;v={int(g["at"])}" alt="" loading="lazy">'
-               if g.get("image") else "")
-        bar = f'<span class="meter{" hot" if end in ("failed", "stopped") else ""}"><i style="width:{sh * 100:.1f}%"></i></span>' if sh is not None else ""
-        v = tr(f"live.job.{end}") if end else f"{nf(sh * 100)} %" if sh is not None else ""
-        tag, href = ("a", f' href="/s/{quote(j["owner"])}?p={e(p)}"') if j["owner"] else ("div", "")
-        return (f'<{tag} class="job bg"{href}>{img}<span class="run"><span class="fname">{e(str(g.get("title") or j["cmd"])[:70])}</span>'
-                f'<span class="why">{" · ".join(x for x in meta if x)}</span>{bar}</span><span class="v{" hot" if end in ("failed", "stopped") else ""}">{v}</span></{tag}>')
-
     tops = [r for r in L["runs"] if not (r["src"] == "subagent" and r["parent"] in ids)]
     subs, bg = len(L["runs"]) - len(tops), L.get("jobs") or []
     head = (tr("live.n", n=L["n"]) + (" · " + tr("live.subs", n=subs) if subs else "")) if L["runs"] else tr("live.none")
@@ -2182,7 +2190,7 @@ def live_card(L, p):
     nxt = ", ".join(f"{e(n or tr('untitled'))} {hm(t)}" for t, n in L["next"])
     return (f'<section class="card live" id="live" data-p="{e(p)}" data-n="{L["n"]}"><h2>{tr("live.h")}</h2><p class="state">{head}</p>'
             + (f'<div class="jobs">{"".join(row(r) for r in tops)}</div>' if tops else "")
-            + (f'<div class="jobs bgs">{"".join(job(j) for j in bg)}</div>' if bg else "")
+            + (f'<div class="jobs bgs">{"".join(job_row(j, p, L["at"]) for j in bg)}</div>' if bg else "")
             + "".join(f'<p class="hint hot">{x}</p>' for x in notes)
             + (f'<p class="hint">{tr("live.next", list=nxt)}</p>' if nxt else "") + "</section>")
 
@@ -3525,9 +3533,12 @@ def page_session(sid, p):
 <p class="hint">{tr("ses.subs.hint", n=cnt(len(kids)), cost=money(subs), p=pct(subs, tot))}</p>
 {table(["th.session", "th.steps", "th.cost", "th.share"], trs, ("", "", "", ""), "titles")}</section>
 """
+    now, mine = time.time(), [j for j in jobs() if j["owner"] == sid and j["agent"] == a]
+    jtab = (f'<section class="card live"><h2>{tr("ses.jobs_h")}</h2><div class="jobs bgs">'
+            + "".join(job_row(j, p, now, True) for j in mine) + "</div></section>\n") if mine else ""
     logged = tr("ses.logged", p=pc(d["logged"] / d["n_steps"] * 100)) if d["n_steps"] else ""
     task = f'<details class="more task"><summary>{tr("ses.task")}</summary><p class="why">{e(task)}</p></details>' if task else ""
-    body = f"""{task}<p class="hint">{tr("ses.resume")} <code class="cmd">hermes {pre}--resume {e(sid)}</code></p>
+    body = f"""{jtab}{task}<p class="hint">{tr("ses.resume")} <code class="cmd">hermes {pre}--resume {e(sid)}</code></p>
 <section class="card"><h2>{tr("ses.eats")}</h2>
 {bars(ranked(d["comp"], group_skills=False), tot, ttl, explain=False, n=40)}</section>
 {ktab}<section class="sec"><h2>{tr("ses.steps_h")}</h2>
@@ -4054,6 +4065,7 @@ def selftest_v4():
         pj("quiet", title="Quiet", frac=0.3, at=t0 - JOB_QUIET - 1)
         pj("dead", title="Dead", frac=0.3, pid=2 ** 22 + 7, at=t0 - 10)
         pj(".hid", title="Hidden", at=t0)
+        (hp / "p.png").write_bytes(b"\x89PNG")
         J = jobs(t0, [("", hp)])
         assert [(j["cmd"], (j["prog"] or {}).get("name"), (j["prog"] or {}).get("end")) for j in J] == [
             ("bash render.sh big", "r", None), ("", "fin", "done"), ("", "dead", "stopped")], J
@@ -4061,7 +4073,8 @@ def selftest_v4():
         assert 'style="width:37.5%"' in cj and "38 %" in cj and 'href="/s/a?p=w"' in cj and "/job/r.img?a=&amp;v=" in cj
         assert "Sample 256/512" in cj and ">Done<" in cj and ">Stopped<" in cj and "background jobs: 3" in cj and "{" not in cj
         assert tr("live.left", d=dur(500)) in cj and cj.count("thumb") == 1
-        (hp / "p.png").write_bytes(b"\x89PNG")
+        big_ = job_row(J[0], "w", t0, True)
+        assert 'class="shot"' in big_ and "href" not in big_ and "thumb" not in big_ and "{" not in big_
         (hp / "big.png").write_bytes(b"0" * (IMG_MAX + 1))
         pj("t", image=str(hp / "state.db")); pj("b", image=str(hp / "big.png")); pj("rel", image="p.png")
         assert job_image("r", hp) == (b"\x89PNG", "image/png") and job_image("fin", hp) is None
