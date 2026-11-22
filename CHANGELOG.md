@@ -2,6 +2,11 @@
 
 Versions follow [Semantic Versioning](https://semver.org).
 
+## 3.13.1 - 2026-11-22
+
+- `tools/progress.py set --state running` restarts the job's clock, so a job file that is reused for the next run
+  no longer counts the old start into the time left.
+
 ## 3.13.0 - 2026-11-22
 
 - Right now lists background jobs: every running Hermes background process with its command, bot · chat and runtime,

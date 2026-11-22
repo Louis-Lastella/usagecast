@@ -8,7 +8,7 @@
   progress.py --test
 
 One small JSON file per job: $HERMES_HOME/progress/NAME.json (HERMES_HOME defaults to ~/.hermes). `set` changes only
-the given fields, so a batch script (done/total/step) and a filter (frac/detail) can write the same file.
+the given fields (`--state running` also restarts the clock for the time-left estimate), so a batch script (done/total/step) and a filter (frac/detail) can write the same file.
 `blender` parses Cycles 'Sample a/b' and Eevee 'Rendering a / b samples' lines, writes frac + detail at most once a
 second and passes every other line through unchanged. --image stores a 480 px jpeg thumbnail if Pillow is installed.
 Standard library only (Pillow optional), Python 3.9 or later.
@@ -66,6 +66,8 @@ def update(name, now=None, **fields):
     if cur.get("image") and cur["image"] == fields.get("image"):
         cur["image"] = thumb(cur["image"], d / (name + ".thumb.jpg"))
     now = time.time() if now is None else now
+    if fields.get("state") == "running":   # an explicit (re)start: the time-left estimate counts from here
+        cur["started"] = now
     cur.setdefault("started", now)
     cur.setdefault("title", name)
     cur["at"] = now
@@ -144,6 +146,9 @@ def test():
         (Path(tmp) / "progress" / "j.json").write_text("{broken")
         update("j", 30.0, step="x")
         assert rd("j")["step"] == "x" and rd("j")["started"] == 30.0
+        update("j", 40.0, state="running")
+        update("j", 50.0, done=2)
+        assert rd("j")["started"] == 40.0
         # filter: throttle (clock +0.1 per progress line), pass-through, \r input, frames
         out, n, calls, real = io.StringIO(), [0], [], update
         def clock():
