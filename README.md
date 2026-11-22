@@ -26,7 +26,7 @@ Try it without Hermes: `python3 app.py --demo` starts it on a month of made-up d
 
 | Page | Content |
 |---|---|
-| `/` | Limits per account with pace, daily budget, forecast and a mascot, Right now (agents at work and their model), key figures with the change against last week, what eats the most, bots & chats (one row per bot, tap to see its topics, channels and threads), models, tips |
+| `/` | Limits per account with pace, daily budget, forecast and a mascot, Right now (agents at work and their model, background jobs with progress and preview), key figures with the change against last week, what eats the most, bots & chats (one row per bot, tap to see its topics, channels and threads), models, tips |
 | `/history` | Cost per day by the biggest items with markers for Hermes updates and config changes, this week laid over the three before, heatmap by weekday and hour, activity calendar, day-by-day table |
 | `/details` | Every tool, skill, plugin, system prompt part and tool description on its own, cache breaks with their likely cause, the ten most expensive single tool results |
 | `/sessions` | Most expensive sessions with bot · chat, model and last activity under each title, a chip per bot, a chat filter and search; the cron chip shows cost per run and per week. A session page shows every step, the model, the subagents it started with their model and cost, and the `hermes --resume <id>` command |
@@ -53,6 +53,28 @@ when every account is tight. With one account everything looks as before.
 **Right now:** The agents working at this moment with bot · chat, what they are doing, for how long and on which model,
 plus the subagents they started. It refreshes every 5 seconds while the page is open and warns when the Hermes gateway
 is down.
+
+**Background jobs:** Below the agents, every running Hermes background process (`processes.json` of each home) with its
+command, bot · chat and runtime; the row opens the session that started it. Long jobs can report how far they are in a
+small JSON file, `$HERMES_HOME/progress/<name>.json`:
+
+```json
+{"title": "Close-ups", "done": 9, "total": 28, "frac": 0.62, "step": "desk-evening", "detail": "Sample 318/512",
+ "pid": 12345, "started": 1795380000, "at": 1795381500, "image": "/path/to/last-frame.thumb.jpg", "state": "running"}
+```
+
+All fields but `title` are optional. Share = (done + frac) / total, or frac alone; the time left comes from the rate
+since `started`. When `pid` is the background process or runs under it, the file fills that row, else it gets its own
+row while `pid` lives (without a pid: up to 30 min after the last write). `state` done/failed, a finished `total` or a
+dead `pid` show as Done/Failed/Stopped for 15 minutes. `image` (png/jpg/webp, max 5 MB) shows as a thumbnail.
+`tools/progress.py` writes these files, so scripts need no JSON of their own:
+
+```sh
+python3 tools/progress.py set render --title "Close-ups" --total 28 --done 9 --step desk-evening --pid $$
+blender -b scene.blend -a 2>&1 | python3 tools/progress.py blender render --frames 1 250   # Sample a/b, Fra:N
+python3 tools/progress.py set render --image out/last.png   # thumbnail when Pillow is there
+python3 tools/progress.py set render --state done
+```
 
 **Several accounts:** the limits card opens with all accounts pooled into one (mean use, next reset); "2 accounts"
 folds out each account on its own, and the device remembers whether it was open.

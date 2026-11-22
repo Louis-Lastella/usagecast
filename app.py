@@ -2010,6 +2010,97 @@ def meter(u, frac=None, hot=False, left=False):
 LIVE_MAX = 900   # s; a busy mark older than this is a run that died, not one that works
 
 
+JOB_KEEP, JOB_QUIET = 900, 1800   # s a finished/stopped job stays listed; s a pid-less progress file counts without a write
+JOB_NAME = re.compile(r"[A-Za-z0-9_-][A-Za-z0-9._-]{0,63}")
+IMG_TYPES, IMG_MAX = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp"}, 5 << 20
+
+
+def proc(pid):
+    """(parent pid, start time in clock ticks) of a running process, None when it is gone or a zombie."""
+    try:
+        f = Path(f"/proc/{int(pid)}/stat").read_text().rsplit(")", 1)[1].split()
+        return None if f[0] == "Z" else (int(f[1]), int(f[19]))
+    except (OSError, ValueError, IndexError, TypeError):
+        return None
+
+
+def cmd_label(c):
+    """Short label of a shell command: leading cd steps, env assignments and the home path dropped, whitespace folded."""
+    c = re.sub(r"^(\s*(cd\s+\S+\s*(&&|;)|\w+=\S*\s|exec\s))+\s*", "", str(c or "")).replace(str(Path.home()), "~")
+    return " ".join(c.split())[:90]
+
+
+def job_share(g):
+    """Done share 0..1 of a progress file: (done + frac) / total, or frac alone; None when it reports none."""
+    try:
+        fr, t = min(max(float(g.get("frac") or 0), 0), 1), float(g.get("total") or 0)
+        return min((float(g.get("done") or 0) + fr) / t, 1) if t > 0 else fr if "frac" in g else None
+    except (TypeError, ValueError):
+        return None
+
+
+def jobs(now=None, hs=None):
+    """Background work of every home: live Hermes background processes (processes.json) and progress files
+    (progress/<name>.json, see tools/progress.py). A file whose pid is such a process or runs under one fills that row."""
+    now, out = now or time.time(), []
+    for a, h in hs or homes():
+        rows, by_pid = [], {}
+        for p in read_json(h / "processes.json") or []:
+            st = proc(p.get("pid")) if isinstance(p, dict) else None
+            if st and (not p.get("host_start_time") or st[1] == p["host_start_time"]):
+                rows.append(dict(agent=a, cmd=cmd_label(p.get("command")), since=p.get("started_at") or now,
+                                 owner=p.get("owner_task_id") or p.get("parent_session_id"), prog=None))
+                by_pid[int(p["pid"])] = rows[-1]
+        for f in sorted((h / "progress").glob("*.json")):
+            g = read_json(f)
+            if not isinstance(g, dict) or not JOB_NAME.fullmatch(f.stem):
+                continue
+            try:
+                at, pid = float(g.get("at") or f.stat().st_mtime), g.get("pid")
+            except (OSError, TypeError, ValueError):
+                continue
+            pid = pid if isinstance(pid, int) and pid > 1 else None
+            end = g.get("state") if g.get("state") in ("done", "failed") else "done" if job_share(g) == 1 and g.get("total") else None
+            if not end and pid and not proc(pid):
+                end = "stopped"
+            if end and now - at > JOB_KEEP or not end and not pid and now - at > JOB_QUIET:
+                continue
+            host, seen = None, set()
+            while pid and pid not in seen and not end:   # walk up the parents to a Hermes background process
+                if pid in by_pid and not by_pid[pid]["prog"]:
+                    host = by_pid[pid]
+                    break
+                seen.add(pid)
+                pid = (proc(pid) or (0,))[0]
+            g = dict(g, name=f.stem, end=end, at=at, share=1.0 if end == "done" else job_share(g))
+            if host:
+                host["prog"] = g
+            else:
+                rows.append(dict(agent=a, cmd="", since=g.get("started") or at, owner=None, prog=g))
+        if rows:
+            with at_home(h):
+                try:
+                    ci = chat_index(connect())
+                except sqlite3.Error:
+                    ci = {}
+            for r in rows:
+                r["platform"], r["chat"] = ci.get(r["owner"], (None, None))
+        out += rows
+    return sorted(out, key=lambda r: r["since"])
+
+
+def job_image(name, h):
+    """(bytes, content type) of a progress file's preview image in home h, None unless name, type, place and size check out."""
+    g = read_json(h / "progress" / f"{name}.json") if h is not None and JOB_NAME.fullmatch(name) else None
+    f = Path(g["image"]) if isinstance(g, dict) and isinstance(g.get("image"), str) else None
+    try:
+        if f and f.is_absolute() and f.suffix.lower() in IMG_TYPES and f.is_file() and f.stat().st_size <= IMG_MAX:
+            return f.read_bytes(), IMG_TYPES[f.suffix.lower()]
+    except OSError:
+        pass
+    return None
+
+
 def live(now=None, hs=None):
     """Agents at work right now. While a turn runs, Hermes keeps an activity text on the session ("tool running:
     terminal") and clears it at the end; subagents are sessions with a parent. Plus the gateway and the next cron runs."""
@@ -2050,7 +2141,7 @@ def live(now=None, hs=None):
             continue
         if j.get("enabled", True) and j.get("state") == "scheduled" and not j.get("no_agent") and t > now:
             nxt.append((t, j.get("name") or ""))
-    return dict(runs=runs, n=sum(r["src"] != "subagent" for r in runs), up=up, down=down, next=sorted(nxt)[:3], at=now)
+    return dict(runs=runs, n=sum(r["src"] != "subagent" for r in runs), up=up, down=down, next=sorted(nxt)[:3], at=now, jobs=jobs(now, hs))
 
 
 def live_card(L, p):
@@ -2068,13 +2159,30 @@ def live_card(L, p):
                 f'<span class="why">{" · ".join(x for x in meta if x)}</span></span><span class="v">{money(r["cost"])}</span></a>'
                 + "".join(row(k, " sub") for k in kids[r["id"]]))
 
+    def job(j):
+        g = j["prog"] or {}
+        sh, end = g.get("share"), g.get("end")
+        left = (L["at"] - float(g.get("started") or j["since"])) * (1 - sh) / sh if not end and sh and 0.02 <= sh < 1 else None
+        meta = [e(bot_chat(j)) if j["owner"] and j["chat"] else "", e(str(g.get("step") or "")[:60]),
+                e(str(g.get("detail") or "")[:40]), "" if end else tr("live.for", d=dur(L["at"] - j["since"])),
+                tr("live.left", d=dur(left)) if left else ""]
+        img = (f'<img class="thumb" src="/job/{quote(g["name"])}.img?a={quote(j["agent"])}&amp;v={int(g["at"])}" alt="" loading="lazy">'
+               if g.get("image") else "")
+        bar = f'<span class="meter{" hot" if end in ("failed", "stopped") else ""}"><i style="width:{sh * 100:.1f}%"></i></span>' if sh is not None else ""
+        v = tr(f"live.job.{end}") if end else f"{nf(sh * 100)} %" if sh is not None else ""
+        tag, href = ("a", f' href="/s/{quote(j["owner"])}?p={e(p)}"') if j["owner"] else ("div", "")
+        return (f'<{tag} class="job bg"{href}>{img}<span class="run"><span class="fname">{e(str(g.get("title") or j["cmd"])[:70])}</span>'
+                f'<span class="why">{" · ".join(x for x in meta if x)}</span>{bar}</span><span class="v{" hot" if end in ("failed", "stopped") else ""}">{v}</span></{tag}>')
+
     tops = [r for r in L["runs"] if not (r["src"] == "subagent" and r["parent"] in ids)]
-    subs = len(L["runs"]) - len(tops)
+    subs, bg = len(L["runs"]) - len(tops), L.get("jobs") or []
     head = (tr("live.n", n=L["n"]) + (" · " + tr("live.subs", n=subs) if subs else "")) if L["runs"] else tr("live.none")
+    head += " · " + tr("live.bg", n=len(bg)) if bg else ""
     notes = [tr("live.gw.off")] if L["up"] is False else [tr("live.gw.down", names=e(", ".join(L["down"])))] if L["down"] else []
     nxt = ", ".join(f"{e(n or tr('untitled'))} {hm(t)}" for t, n in L["next"])
     return (f'<section class="card live" id="live" data-p="{e(p)}" data-n="{L["n"]}"><h2>{tr("live.h")}</h2><p class="state">{head}</p>'
             + (f'<div class="jobs">{"".join(row(r) for r in tops)}</div>' if tops else "")
+            + (f'<div class="jobs bgs">{"".join(job(j) for j in bg)}</div>' if bg else "")
             + "".join(f'<p class="hint hot">{x}</p>' for x in notes)
             + (f'<p class="hint">{tr("live.next", list=nxt)}</p>' if nxt else "") + "</section>")
 
@@ -3694,6 +3802,9 @@ class Handler(BaseHTTPRequestHandler):
                 body = page_settings(q, path[10:])
             elif path == "/wrapped":
                 body = page_wrapped(q)
+            elif path.startswith("/job/") and path.endswith(".img"):
+                img = job_image(unquote(path[5:-4]), dict(homes()).get((q.get("a") or [""])[0]))
+                return self.send(*img) if img else self.send_error(404)
             elif path == "/live":
                 return self.send(live_card(live(), p).encode(), "text/html; charset=utf-8")
             elif path == "/api/summary":
@@ -3930,6 +4041,31 @@ def selftest_v4():
         card_ = live_card(L, "w")
         assert card_.count('<a class="job') == 2 and 'class="job sub"' in card_ and "{" not in card_
         assert 'id="live" data-p="w" data-n="1"' in card_
+        _req.lang, hp, me = "en", Path(tdir), os.getpid()   # background jobs: processes.json + progress files
+        (hp / "progress").mkdir()
+        (hp / "processes.json").write_text(json.dumps([
+            dict(pid=me, host_start_time=proc(me)[1], command="cd /x && A=1 B=$X/y bash render.sh  big", started_at=t0 - 300, owner_task_id="a"),
+            dict(pid=me, host_start_time=1, command="reused pid"), dict(pid=2 ** 22 + 7, command="gone")]))
+        pj = lambda n, **kw: (hp / "progress" / f"{n}.json").write_text(json.dumps(kw))
+        pj("r", title="Batch", done=1, total=4, frac=0.5, step="img2", detail="Sample 256/512", pid=me, started=t0 - 300, at=t0 - 2,
+           image=str(hp / "p.png"))
+        pj("old", title="Old", state="done", at=t0 - JOB_KEEP - 1)
+        pj("fin", title="Fin", done=3, total=3, at=t0 - 60)
+        pj("quiet", title="Quiet", frac=0.3, at=t0 - JOB_QUIET - 1)
+        pj("dead", title="Dead", frac=0.3, pid=2 ** 22 + 7, at=t0 - 10)
+        pj(".hid", title="Hidden", at=t0)
+        J = jobs(t0, [("", hp)])
+        assert [(j["cmd"], (j["prog"] or {}).get("name"), (j["prog"] or {}).get("end")) for j in J] == [
+            ("bash render.sh big", "r", None), ("", "fin", "done"), ("", "dead", "stopped")], J
+        cj = live_card(dict(runs=[], n=0, up=True, down=[], next=[], at=t0, jobs=J), "w")
+        assert 'style="width:37.5%"' in cj and "38 %" in cj and 'href="/s/a?p=w"' in cj and "/job/r.img?a=&amp;v=" in cj
+        assert "Sample 256/512" in cj and ">Done<" in cj and ">Stopped<" in cj and "background jobs: 3" in cj and "{" not in cj
+        assert tr("live.left", d=dur(500)) in cj and cj.count("thumb") == 1
+        (hp / "p.png").write_bytes(b"\x89PNG")
+        (hp / "big.png").write_bytes(b"0" * (IMG_MAX + 1))
+        pj("t", image=str(hp / "state.db")); pj("b", image=str(hp / "big.png")); pj("rel", image="p.png")
+        assert job_image("r", hp) == (b"\x89PNG", "image/png") and job_image("fin", hp) is None
+        assert all(job_image(n_, hp) is None for n_ in ("../r", ".hid", "t", "b", "rel", "nope"))
         old_ = dict(SET)
         SET.update(tg_bot="off", push="telegram")
         assert tg_target() is None and send_push("t", "x")[0] is False and push_on() is False

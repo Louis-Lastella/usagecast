@@ -25,7 +25,7 @@ Ohne Hermes ausprobieren: `python3 app.py --demo` startet es mit einem Monat erf
 
 | Seite | Inhalt |
 |---|---|
-| `/` | Limits pro Konto mit Tempo, Tagesbudget, Prognose und Maskottchen, Gerade jetzt (arbeitende Agenten und ihr Modell), Kennzahlen mit Vergleich zur Vorwoche, Rangliste was am meisten frisst, Bots & Chats (eine Zeile pro Bot, antippen zeigt Themen, Kanäle und Threads), Modelle, Spartipps |
+| `/` | Limits pro Konto mit Tempo, Tagesbudget, Prognose und Maskottchen, Gerade jetzt (arbeitende Agenten und ihr Modell, Hintergrundjobs mit Fortschritt und Vorschau), Kennzahlen mit Vergleich zur Vorwoche, Rangliste was am meisten frisst, Bots & Chats (eine Zeile pro Bot, antippen zeigt Themen, Kanäle und Threads), Modelle, Spartipps |
 | `/history` | Kosten pro Tag nach den größten Posten mit Markern für Hermes-Updates und Config-Änderungen, diese Woche über den drei davor, Heatmap nach Wochentag und Uhrzeit, Aktivitätskalender, Tagestabelle |
 | `/details` | Alle Tools, Skills, Plugins, Systemprompt-Teile und Tool-Beschreibungen einzeln, Cache-Brüche mit wahrscheinlicher Ursache, die zehn teuersten einzelnen Tool-Ergebnisse |
 | `/sessions` | Teuerste Sessions mit Bot · Chat, Modell und letzter Aktivität unter jedem Titel, einem Chip pro Bot, Chat-Filter und Suche; der Chip Cron-Jobs zeigt Kosten pro Lauf und Woche. Eine Session-Seite zeigt jeden Schritt, das Modell, die gestarteten Subagenten mit Modell und Kosten und den Befehl `hermes --resume <id>` |
@@ -52,6 +52,28 @@ der Budget-Wächter greift erst, wenn alle Konten knapp sind. Mit einem Konto si
 **Gerade jetzt:** Die Agenten, die in diesem Moment arbeiten, mit Bot · Chat, was sie tun, wie lange schon und mit
 welchem Modell, dazu ihre Subagenten. Aktualisiert sich alle 5 Sekunden, solange die Seite offen ist, und warnt, wenn
 das Hermes-Gateway nicht läuft.
+
+**Hintergrundjobs:** Unter den Agenten jeder laufende Hermes-Hintergrundprozess (`processes.json` jedes Homes) mit
+Befehl, Bot · Chat und Laufzeit; die Zeile öffnet die Session, die ihn gestartet hat. Lange Jobs können ihren Stand in
+eine kleine JSON-Datei schreiben, `$HERMES_HOME/progress/<name>.json`:
+
+```json
+{"title": "Nahansichten", "done": 9, "total": 28, "frac": 0.62, "step": "tisch-abend", "detail": "Sample 318/512",
+ "pid": 12345, "started": 1795380000, "at": 1795381500, "image": "/pfad/zum/letzten-bild.thumb.jpg", "state": "running"}
+```
+
+Außer `title` ist alles optional. Anteil = (done + frac) / total, sonst frac allein; die Restzeit kommt aus dem Tempo
+seit `started`. Ist `pid` der Hintergrundprozess oder läuft darunter, füllt die Datei dessen Zeile, sonst bekommt sie
+eine eigene, solange `pid` lebt (ohne pid: bis 30 Min. nach dem letzten Schreiben). `state` done/failed, ein erreichtes
+`total` oder eine tote `pid` stehen 15 Minuten als Fertig/Fehlgeschlagen/Abgebrochen da. `image` (png/jpg/webp, max.
+5 MB) erscheint als Vorschaubild. `tools/progress.py` schreibt diese Dateien, Skripte brauchen also kein eigenes JSON:
+
+```sh
+python3 tools/progress.py set render --title "Nahansichten" --total 28 --done 9 --step tisch-abend --pid $$
+blender -b szene.blend -a 2>&1 | python3 tools/progress.py blender render --frames 1 250   # Sample a/b, Fra:N
+python3 tools/progress.py set render --image out/letztes.png   # Vorschaubild, wenn Pillow da ist
+python3 tools/progress.py set render --state done
+```
 
 **Mehrere Konten:** Die Limit-Karte zeigt zuerst alle Konten zusammen als eins (Mittelwert, nächster Reset); "2 Konten"
 klappt jedes Konto einzeln auf, und das Gerät merkt sich, ob es offen war.

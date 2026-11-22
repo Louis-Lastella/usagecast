@@ -2,6 +2,15 @@
 
 Versions follow [Semantic Versioning](https://semver.org).
 
+## 3.13.0 - 2026-11-22
+
+- Right now lists background jobs: every running Hermes background process with its command, bot · chat and runtime,
+  linked to the session that started it. Jobs that write a progress file (`progress/<name>.json`) get a bar, the share
+  done, the current step, a rough time left and a thumbnail of their last finished image; finished, failed and stopped
+  jobs stay for 15 minutes.
+- `tools/progress.py` writes those files: `set` merges fields, `blender` reads Blender's output (Cycles and Eevee
+  samples, frames) and passes everything else through, `clear` removes a job.
+
 ## 3.12.0 - 2026-11-22
 
 - Haptics on every tap: session and project rows, links in lists, hints and the footer, the settings back link and
