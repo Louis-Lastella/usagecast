@@ -2,6 +2,18 @@
 
 Versions follow [Semantic Versioning](https://semver.org).
 
+## 3.12.0 - 2026-11-22
+
+- Haptics on every tap: session and project rows, links in lists, hints and the footer, the settings back link and
+  everything on the session page vibrate too, not only tabs, chips, buttons, folds and switches. In the Telegram Mini
+  App the same set ticks, each Wrapped slide ticks (swipe or tap) and saving a setting gives a success or error buzz.
+- Smoother taps: controls give way under the finger and spring back, rows and folds tint while pressed, folds open and
+  close with a short height animation, the "Saved" toast rises in.
+- Page switches fade the new page in while the tab bar stays put and the selected period pill or filter chip slides
+  to its new place (View Transitions; off with reduced motion).
+- Settings pages switch in place too (always fresh, never from the device cache), so the settings tab and its
+  sub-pages no longer reload the whole app. A page link starts loading as soon as the finger touches it.
+
 ## 3.11.1 - 2026-11-21
 
 - iPhone: tapping a tab or link vibrates again. Since 3.11.0 the page was swapped while the tap was still running,

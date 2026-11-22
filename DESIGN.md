@@ -48,8 +48,12 @@ limit number 80/600 (-0.04em) · KPI 26/600. Labels are sentence case, never upp
   (ranked bars, hour heatmap, day dots); a muted line under the number compares it with the period before. No new colours.
 - Lists of things with a value (cron jobs, reporting machines) are `.jobs` rows: name left, value right, no bullets.
 - Phone (<= 860 px): the sidebar becomes a bottom tab bar with labels; every control is >= 40-44 px tall.
-- Motion: only 150-200 ms state feedback (switches, folds); nothing animates on load and zoom is locked on phones.
-  `prefers-reduced-motion` turns it all off.
+- Motion: only short state feedback; nothing animates on page load and zoom is locked on phones.
+  `prefers-reduced-motion` turns it all off. The feedback that makes taps feel solid:
+  a pressed control (tab, period pill, chip, button) shrinks to 94 % in 60 ms and springs back in 350 ms, rows and
+  folds tint, plain links dim; folds open and close with a 200-260 ms height animation; a page switch is a view
+  transition (old page fades out in 100 ms, new one fades in and rises 8 px in 220 ms, the tab bar stays, the selected
+  period pill and filter chip slide to their new place); switches move in 200 ms; the "Saved" toast rises in.
   Exception: the Wrapped slides (`/wrapped`) play once each time a slide comes into view, 150-900 ms: numbers count up,
   lines fade in, bars grow, the hour heatmap fills and the active days light up. Nothing on them loops except the
   mascot, and reduced motion shows every slide in its end state.
@@ -58,6 +62,7 @@ limit number 80/600 (-0.04em) · KPI 26/600. Labels are sentence case, never upp
   motion keeps them still.
   Exception: the mascot beside the big weekly number (`pets.py`, setting `pet`) loops quietly (1-4 s) to show its mood
   (calm, agent working, tight, at the limit); its colors are the `--pet-*` tokens, and reduced motion stops it too.
-- Haptics: a tapped control (tab, chip, button, fold, switch) gives a short vibration, `static/haptics.js`. iOS has no
-  Vibration API, so a transparent label tied to a hidden `<input type=checkbox switch>` covers each control; Android
-  uses `navigator.vibrate`.
+- Haptics: every tap on a control (any link, tab, chip, row, button, fold, switch, radio; not text fields, selects
+  and date inputs) gives a short vibration, `static/haptics.js`. iOS has no Vibration API, so a transparent label tied
+  to a hidden `<input type=checkbox switch>` covers each control; Android uses `navigator.vibrate`, the Telegram Mini
+  App its HapticFeedback (there also a tick per Wrapped slide and success/error when a setting saves).

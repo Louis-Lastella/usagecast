@@ -400,13 +400,31 @@ th,td{padding:10px 10px}.o{display:none}
 .bones .card i{height:12px;width:62%;margin-top:14px}.bones .card i:first-child{height:18px;width:34%;margin-top:0}
 .bones .card i:last-child{width:86%}.bones .card:nth-of-type(1){min-height:220px}
 @keyframes bone{50%{opacity:.45}}
+/* Press: a tapped control gives way under the finger and springs back when let go (iOS shows :active only because
+   haptics.js listens to touchstart; .hw = its wrapper around buttons) */
+:is(aside nav a,.seg a,.chips a,.opts span,.btn,a.gear,details.range summary,.wx){transition-property:background-color,color,box-shadow,transform;transition-duration:.15s,.15s,.15s,.35s;transition-timing-function:ease,ease,ease,cubic-bezier(.34,1.56,.64,1)}
+:is(aside nav a,.seg a,.chips a,.btn,a.gear,details.range summary,.wx):active,.opts label:active span,.hw:active>.btn{transform:scale(.94);transition-duration:.15s,.15s,.15s,.06s}
+:is(.srow,details.bar>summary):active{background:var(--tint);transition-duration:0s}
+:is(main a,.pf a,details.more>summary):not(.seg a,.chips a,.btn,.srow):active{opacity:.6}
+/* Page swaps (static/app.js, View Transitions API): the old page fades out quickly, the new one fades in and rises a
+   little, the tab bar stays where it is, the selected period pill and filter chip slide to their new place */
+::view-transition-old(root){animation:vt-out .1s ease-in both}
+::view-transition-new(root){animation:vt-in .22s var(--ease) both}
+@keyframes vt-out{to{opacity:0}}
+@keyframes vt-in{from{opacity:0;transform:translateY(8px)}}
+::view-transition{pointer-events:none}   /* Chromium: taps reach the new page while it fades in (WebKit still drops them for these 0.22 s) */
+aside{view-transition-name:tabbar}
+::view-transition-group(tabbar){z-index:2;animation-duration:.18s}
+.vt .seg a.on{view-transition-name:pill}
+.vt .chips a.on{view-transition-name:chip}
+::view-transition-group(pill),::view-transition-group(chip){z-index:1;animation-duration:.3s;animation-timing-function:var(--ease)}
 @media (prefers-reduced-motion:reduce){*,::before,::after{animation:none!important;transition:none!important}}
 .live .job{color:inherit;text-decoration:none;align-items:flex-start}.live .job.sub{padding-left:18px}.live .run{display:flex;flex-direction:column;gap:2px;min-width:0}.live .run .why{margin:0;text-align:left}.live .job>.v{margin-left:auto;white-space:nowrap;font-variant-numeric:tabular-nums}.live .state{margin:0 0 12px}
 @media (max-width:860px){html.tg main{padding-top:calc(var(--tg-safe-area-inset-top,0px) + var(--tg-content-safe-area-inset-top,0px) + 14px)}html.tg aside{padding-bottom:calc(5px + max(env(safe-area-inset-bottom),var(--tg-safe-area-inset-bottom,0px)))}}
 /* Settings save on change (static/app.js): no save button, a short status that fades instead */
 .auto .save{display:none}
-#saved{position:fixed;left:50%;width:max-content;max-width:calc(100vw - 32px);text-align:center;bottom:calc(24px + env(safe-area-inset-bottom));z-index:30;transform:translateX(-50%);padding:8px 16px;border-radius:999px;background:var(--ink);color:var(--card);font-size:14px;font-weight:500;box-shadow:0 2px 8px var(--shc);opacity:0;pointer-events:none;transition:opacity .18s}
-#saved.on{opacity:1}
+#saved{position:fixed;left:50%;width:max-content;max-width:calc(100vw - 32px);text-align:center;bottom:calc(24px + env(safe-area-inset-bottom));z-index:30;transform:translateX(-50%);padding:8px 16px;border-radius:999px;background:var(--ink);color:var(--card);font-size:14px;font-weight:500;box-shadow:0 2px 8px var(--shc);opacity:0;pointer-events:none;transform:translate(-50%,10px) scale(.96);transition:opacity .18s,transform .35s var(--ease)}
+#saved.on{opacity:1;transform:translateX(-50%)}
 #saved.bad{background:var(--acc-ink)}
 .fnote{display:block;margin-top:4px;color:var(--acc-ink);font-size:13.5px}
 @media (max-width:860px){#saved{bottom:calc(72px + env(safe-area-inset-bottom))}}

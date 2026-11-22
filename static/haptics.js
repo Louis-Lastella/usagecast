@@ -1,20 +1,33 @@
 // The page exactly as the server sent it, before the labels below change it: static/app.js keeps it in its page cache.
 window.ucPage = document.documentElement.outerHTML
-// A short vibration when a control is tapped: tabs, period and filter chips, buttons, folds, settings switches.
+// A short vibration on every tap of a control: links, tabs, chips, rows, buttons, folds, switches, radios. Not on text
+// fields, selects and date inputs (their native picker must open; iOS gives its own feedback there).
 // iOS Safari has no Vibration API, but its <input type=checkbox switch> vibrates when it is toggled through a label
 // the finger really touched (a script .click() stopped counting with iOS 26.5). So on iOS every control gets a
 // transparent label on top, tied to a hidden switch: the tap hits the label, Safari vibrates, and because the label
 // swallows the tap's normal action, the script clicks the control itself. Same trick as github.com/tijnjh/ios-haptics.
-// Other phones use navigator.vibrate where it exists (Android). The system setting for haptics still applies.
-const SEL = "nav a, a.gear, a.btn, button:not(.sr), summary, .set input[type=checkbox], .set input[type=radio]"
+// In the Telegram Mini App Telegram's own HapticFeedback ticks instead, on Android navigator.vibrate. The system
+// setting for haptics still applies. window.ucTick(kind) is for events without a tap (Wrapped swipe, settings saved):
+// it works in Telegram and on Android; plain iOS Safari cannot vibrate without a touch.
+const SEL = "a[href], button:not(.sr), summary, input[type=checkbox]:not(#haptic), input[type=radio]"
 const ios = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
-let tg = false   // opened as a Telegram Mini App: app.js uses Telegram's own haptics instead
+let tg = false
 try { tg = location.hash.includes("tgWebAppData") || !!sessionStorage.getItem("__telegram__initParams") } catch (e) {}
 
-if (tg) {
-  // nothing to do here
-} else if (!ios) {
-  if (navigator.vibrate) addEventListener("click", e => { if (e.isTrusted && e.target.closest(SEL)) navigator.vibrate(8) })
+window.ucTick = kind => {
+  if (tg) {
+    const W = window.Telegram?.WebApp, h = W?.isVersionAtLeast?.("6.1") && W.HapticFeedback
+    if (!h) return
+    kind === "ok" ? h.notificationOccurred("success") : kind === "bad" ? h.notificationOccurred("error") : h.selectionChanged()
+  } else if (!ios && navigator.vibrate) navigator.vibrate(kind === "bad" ? [20, 60, 20] : 8)
+}
+
+// iOS shows :active (the press state in style.css) only when some touchstart listener exists
+addEventListener("touchstart", () => {}, { passive: true })
+
+if (tg || !ios) {
+  // Wrapped's tap zones tick through wrapped.js when the slide changes, so a tap there does not tick twice
+  addEventListener("click", e => { if (e.isTrusted && e.target.closest(SEL) && !e.target.closest(".tz")) ucTick() })
 } else {
   // One hidden switch outside every control: its copy of the tap must not bubble through a button (that submitted twice).
   // Hidden and out of the way, since WebKit treats a touchstart on it as handled and would cancel the scroll.
@@ -28,18 +41,19 @@ if (tg) {
   sw.addEventListener("click", e => e.stopPropagation())
   document.body.append(sw)
   label()
-  addEventListener("uc:swap", label)   // static/app.js swapped in a new page
+  addEventListener("uc:swap", label)   // static/app.js swapped in a new page or card
 }
 
 function label() {
   for (const el of document.querySelectorAll(SEL)) {
     if (el.disabled || el.hap) continue
     el.hap = 1
-    // A radio is covered with its label (the label is the visible segment). Buttons and bare switches get a wrapper and
-    // the label goes next to them, not inside: a tap on a label inside a button still submits in Chromium.
-    let host = el.type === "radio" ? el.closest("label") : el.matches("a, summary") ? el : null
+    // A radio is covered with its label (the visible segment or row). Buttons and bare switches get a wrapper and the
+    // label goes next to them, not inside: a tap on a label inside a button still submits in Chromium.
+    let host = el.matches("a, summary") ? el : el.type === "radio" ? el.closest("label") : null
     if (!host) {
       host = document.createElement("span")
+      host.className = "hw"
       host.style.display = "inline-flex"
       el.before(host)
       host.append(el)

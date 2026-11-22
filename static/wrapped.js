@@ -29,7 +29,9 @@ const seen = new IntersectionObserver(es => es.forEach(x => {
 slides.forEach(s => seen.observe(s))
 
 story.addEventListener("scroll", () => {
-  cur = Math.round(story.scrollLeft / story.clientWidth)
+  const i = Math.round(story.scrollLeft / story.clientWidth)
+  if (i !== cur) window.ucTick?.()   // Telegram and Android: a tick per slide (iOS Safari ticks on the tap zones only)
+  cur = i
   bars.forEach((b, j) => b.classList.toggle("on", j <= cur))
 }, { passive: true })
 addEventListener("click", e => {

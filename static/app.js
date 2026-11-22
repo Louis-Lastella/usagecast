@@ -46,18 +46,20 @@ function mini(W) {
   tgBack = W.BackButton
   tgBack.onClick(() => {
     const up = document.querySelector("a.back")   // a settings sub-page: back means the settings list, not the last POST
-    up ? location.assign(up.href) : history.length > 1 ? history.back() : location.assign("/")
+    up ? up.click() : history.length > 1 ? history.back() : location.assign("/")
   })
   backButton()
-  addEventListener("click", e => {
-    if (e.isTrusted && e.target.closest("nav a, a.gear, a.btn, a.job, button, summary, .set input[type=checkbox], .set input[type=radio]"))
-      W.HapticFeedback.selectionChanged()
-  })
+  tgW = W
+  tgHome()
+}
+
+let tgW
+function tgHome() {   // the settings' "add to home screen" button, also after a page swap
   const home = document.getElementById("tg-home")
-  if (home && at("8.0")) W.checkHomeScreenStatus(st => {
+  if (home && tgW?.isVersionAtLeast("8.0")) tgW.checkHomeScreenStatus(st => {
     if (st === "unsupported" || st === "added") return
     home.hidden = false
-    home.onclick = () => W.addToHomeScreen()
+    home.onclick = () => tgW.addToHomeScreen()
   })
 }
 
@@ -66,17 +68,20 @@ function mini(W) {
 // buttons (set up, test, new topic, ...) still submit normally.
 function autoSave(form) {
   document.documentElement.classList.add("auto")
-  const toast = document.createElement("div")
-  toast.id = "saved"
-  toast.setAttribute("role", "status")
-  document.body.append(toast)
-  let timer
+  let toast = document.getElementById("saved")   // outside .app: it stays across page swaps
+  if (!toast) {
+    toast = document.createElement("div")
+    toast.id = "saved"
+    toast.setAttribute("role", "status")
+    document.body.append(toast)
+  }
   const say = (text, err) => {
-    clearTimeout(timer)
+    window.ucTick?.(err ? "bad" : "ok")
+    clearTimeout(toast.timer)
     toast.textContent = text
     toast.classList.toggle("bad", err)
     toast.classList.add("on")
-    timer = setTimeout(() => { toast.classList.remove("on"); timer = setTimeout(() => { toast.textContent = "" }, 250) }, 1500)
+    toast.timer = setTimeout(() => { toast.classList.remove("on"); toast.timer = setTimeout(() => { toast.textContent = "" }, 250) }, 1500)
   }
   const note = (f, text) => {
     const box = f.closest(".field")?.firstElementChild || f.parentNode
@@ -115,21 +120,45 @@ function autoSave(form) {
   // Enter in a field: the change event has already saved it, so the hidden default button must not submit the page too
   form.addEventListener("submit", e => { if (e.submitter?.classList.contains("sr")) e.preventDefault() })
 }
-const setForm = document.querySelector("form.set")
-if (setForm) autoSave(setForm)
+function setup() {   // what a page needs once it is in place, after a load or a swap
+  const f = document.querySelector("form.set")
+  if (f) autoSave(f)
+  tgHome()
+}
+setup()
+
+// Folds open and close with a short height animation instead of jumping (not the period picker, it is a popover)
+const still = matchMedia("(prefers-reduced-motion: reduce)")
+addEventListener("click", e => {
+  const s = e.target.closest?.("details:not(.range)>summary"), d = s?.parentElement
+  if (!d || e.defaultPrevented || still.matches) return
+  e.preventDefault()
+  const from = d.getBoundingClientRect().height, open = d.open && !d.closing
+  d.anim?.cancel()
+  d.open = !open
+  const to = d.getBoundingClientRect().height
+  d.open = true   // stays open while it closes, so the content is visible as it shrinks
+  d.closing = open
+  d.style.overflow = "clip"
+  d.anim = d.animate({ height: [from + "px", to + "px"] }, { duration: open ? 200 : 260, easing: "cubic-bezier(.16,1,.3,1)" })
+  d.anim.onfinish = () => { d.anim = null; d.closing = false; d.open = !open; d.style.overflow = "" }
+})
 
 // Instant page switches: a click on a page link swaps the page in place instead of loading it. Every page fetched
 // lands in a device cache (localStorage, the last 30, dropped when the static files or language or theme change);
 // a cached page shows at once and is swapped silently once the fresh copy arrives. An uncached one shows "bones" in
 // main after 150 ms. Anything odd (network error, not 200, not HTML, a redirect) falls back to a normal page load.
-// Not taken over: Wrapped, settings (own auto-save form), language links, the API, forms, new tabs.
+// Settings pages swap too, but always fresh, never from the cache: a stale switch would be saved back with its form.
+// The swap runs as a view transition (style.css): the content fades in, the tab bar stays, the selected pill slides.
+// A page link starts loading on the touch already (pointerdown), not only on the click.
+// Not taken over: Wrapped, language links, the API, forms, new tabs.
 const R = document.documentElement
 const V = [new URL(document.currentScript.src).searchParams.get("v"), R.lang, R.dataset.theme].join()
-const SKIP = /^\/(wrapped|settings|api\/|cc-report\.py)/
+const SKIP = /^\/(wrapped|api\/|cc-report\.py)/, FRESH = /^\/settings/
 const BONES = '<div class="bones" aria-busy="true"><i class="b1"></i><i class="b2"></i>' +
   '<div class="card"><i></i><i></i><i></i></div>'.repeat(3) + '</div>'
 const skip = u => u.origin !== location.origin || SKIP.test(u.pathname) || u.searchParams.has("lang")
-let idx, cur = location.pathname + location.search, seq = 0, busy = 0
+let idx, cur = location.pathname + location.search, seq = 0, busy = 0, soon = {}
 try { idx = JSON.parse(localStorage.uc) } catch (e) {}
 if (!idx || idx.v !== V) {
   try { for (const k of Object.keys(localStorage)) if (k.startsWith("uc:")) localStorage.removeItem(k) } catch (e) {}
@@ -137,11 +166,13 @@ if (!idx || idx.v !== V) {
 }
 
 function get(u) {
+  if (FRESH.test(u)) return
   const i = idx.l.find(x => x[0] === u)
   try { return i && { t: i[1], h: localStorage["uc:" + u] } } catch (e) {}
 }
 
 function put(u, h) {
+  if (FRESH.test(u)) return
   const l = idx.l = idx.l.filter(x => x[0] !== u)
   const drop = x => { try { localStorage.removeItem("uc:" + x[0]) } catch (e) {} }
   l.push([u, Date.now()])
@@ -162,7 +193,16 @@ async function load(u) {
 }
 
 function show(h, y, keep) {
-  const d = new DOMParser().parseFromString(h, "text/html"), N = d.documentElement
+  const d = new DOMParser().parseFromString(h, "text/html")
+  const swap = () => place(d, y, keep)
+  // a silent refresh of the same page swaps without any motion
+  if (keep || still.matches || !document.startViewTransition || document.hidden) return swap()
+  R.classList.add("vt")
+  document.startViewTransition(swap).finished.finally(() => R.classList.remove("vt"))
+}
+
+function place(d, y, keep) {
+  const N = d.documentElement
   const open = keep ? [...document.querySelectorAll("main details")].map(x => x.open) : []
   document.title = d.title
   R.lang = N.lang
@@ -175,6 +215,7 @@ function show(h, y, keep) {
   try { if (a) a.open = !!localStorage.accts } catch (e) {}   // the cached copy may carry an old open state
   if (y) scrollTo(0, y)
   backButton()
+  setup()
   dispatchEvent(new Event("uc:swap"))
 }
 
@@ -186,7 +227,7 @@ async function go(u, push, y = 0) {
   if (c?.h) show(c.h, y)
   else t = setTimeout(() => { if (n === seq) { document.querySelector("main").innerHTML = BONES; scrollTo(0, 0) } }, 150)
   try {
-    const h = await load(u)
+    const h = await (soon[u] || load(u))
     clearTimeout(t)
     if (n !== seq) return
     if (!c?.h) show(h, y)
@@ -204,7 +245,7 @@ async function prefetch() {
   busy = 1
   for (const a of document.querySelectorAll("aside nav a")) {
     const u = new URL(a.href), k = u.pathname + u.search, c = get(k)
-    if (skip(u) || document.hidden || c?.h && Date.now() - c.t < 120000) continue
+    if (skip(u) || FRESH.test(k) || document.hidden || c?.h && Date.now() - c.t < 120000) continue
     try { await load(k) } catch (e) {}
   }
   busy = 0
@@ -223,6 +264,14 @@ if (document.querySelector(".app")) {
     const k = u.pathname + u.search
     go(k, k !== cur)
   })
+  addEventListener("pointerdown", e => {
+    const a = e.target.closest?.("a[href]")
+    if (!a || a.target || a.getAttribute("href").startsWith("#")) return
+    const u = new URL(a.href), k = u.pathname + u.search
+    if (skip(u) || get(k)?.h || soon[k]) return
+    const q = soon[k] = load(k)
+    q.catch(() => {}).finally(() => setTimeout(() => { if (soon[k] === q) delete soon[k] }, 3000))
+  }, { passive: true })
   addEventListener("popstate", e => {
     const k = location.pathname + location.search
     if (k !== cur) go(k, false, e.state?.y)
