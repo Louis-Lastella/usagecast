@@ -32,7 +32,7 @@ Ohne Hermes ausprobieren: `python3 app.py --demo` startet es mit einem Monat erf
 | `/wrapped` | Ein Monat oder ein Jahr als Story-Folien (siehe Wrapped unten) |
 | `/projects` | Kosten pro Projekt, antippen zeigt die Sessions dazu |
 | `/settings` | Eine kurze Liste mit je einer Seite: Darstellung, Warnungen, Benachrichtigungen, Budget-Wächter, Erweitert |
-| `/api/summary` | Limits, Prognose, Konten und Kosten der Limit-Woche als JSON, für Widgets |
+| `/api/summary` | Limits, Prognose, Konten, laufende Jobs und Kosten der Limit-Woche als JSON, für Widgets |
 
 Zeitraum per `?p=w` (seit dem letzten Reset des Wochenlimits, Standard), `?p=1`, `?p=7`, `?p=30` oder ein eigener
 Zeitraum wie `?p=2026-10-01..2026-10-07` (Knopf „Eigener“).
@@ -251,6 +251,7 @@ PORT=7681 python3 app.py     # Server auf 127.0.0.1:7681
 | `USAGECAST_LANG` | Standardsprache, `en` (Standard) oder `de` |
 | `USAGECAST_NTFY` | ntfy-Ziel, falls nicht aus Hermes |
 | `USAGECAST_URL` | Standard für die Dashboard-Adresse in den Einstellungen, ein Tipp auf die Warnung öffnet sie |
+| `USAGECAST_PROXY_TOKEN` | Token, den eine Anfrage über einen Cloudflare-Tunnel als `Authorization: Bearer` mitschicken muss; nicht gesetzt = so kein Zugriff |
 
 Im Hintergrund misst der Server einmal am Tag Systemprompt und Tool-Beschreibungen (`--snapshot`, läuft im
 Hermes-venv) und holt alle 10 Minuten die Abo-Limits über Hermes' OAuth-Login. Der Token verlässt dabei den

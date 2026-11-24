@@ -2,6 +2,14 @@
 
 Versions follow [Semantic Versioning](https://semver.org).
 
+## 3.15.0 - 2026-11-24
+
+- `/api/summary` lists up to three running background jobs as `jobs` (`name`, `pct`, `eta_s`), so a small display
+  (an ESP32 desk clock, a widget) can show what is running. All other fields stay the same.
+- Requests that come through a Cloudflare tunnel (they carry `Cf-Connecting-Ip`) need the token from
+  `USAGECAST_PROXY_TOKEN` as `Authorization: Bearer`, else 403. Without that variable nothing gets in that way.
+  Direct and Tailscale requests are unchanged.
+
 ## 3.14.0 - 2026-11-22
 
 - A background job's row opens the session that started it, and that page now shows the job with its last image in

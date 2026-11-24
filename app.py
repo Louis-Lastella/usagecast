@@ -2152,8 +2152,7 @@ def job_row(j, p, now, big=False):
     """One background job: title, bot · chat, step, runtime, time left, bar and share. Small: a thumbnail and a link to
     the session that started it (Right now). big: on that session's page, the last image in full card width instead."""
     g = j["prog"] or {}
-    sh, end = g.get("share"), g.get("end")
-    left = (now - float(g.get("started") or j["since"])) * (1 - sh) / sh if not end and sh and 0.02 <= sh < 1 else None
+    sh, end, left = g.get("share"), g.get("end"), job_left(j, now)
     meta = [e(bot_chat(j)) if j["owner"] and j["chat"] else "", e(str(g.get("step") or "")[:60]),
             e(str(g.get("detail") or "")[:40]), "" if end else tr("live.for", d=dur(now - j["since"])),
             tr("live.left", d=dur(left)) if left else ""]
@@ -2195,6 +2194,26 @@ def live_card(L, p):
             + (f'<p class="hint">{tr("live.next", list=nxt)}</p>' if nxt else "") + "</section>")
 
 
+def job_left(j, now):
+    """Rough seconds left of a job row from its share done and runtime, None when unknown or finished."""
+    g = j["prog"] or {}
+    sh = g.get("share")
+    return (now - float(g.get("started") or j["since"])) * (1 - sh) / sh if not g.get("end") and sh and 0.02 <= sh < 1 else None
+
+
+def summary_jobs(J, now):
+    """Running background jobs for /api/summary: at most 3 of {name, pct, eta_s}, finished ones left out."""
+    out = []
+    for j in J:
+        g = j["prog"] or {}
+        if g.get("end"):
+            continue
+        sh, left = g.get("share"), job_left(j, now)
+        out.append({"name": str(g.get("title") or g.get("name") or j["cmd"])[:40], "pct": None if sh is None else int(sh * 100),
+                    "eta_s": None if left is None else round(left)})
+    return out[:3]
+
+
 def api_summary():
     """Compact JSON for widgets: limits with reset times, the week forecast and this limit week's cost."""
     fresh_limits()
@@ -2219,7 +2238,8 @@ def api_summary():
         out["accounts"] = [{"label": a["label"] or a["id"][:8], "use": a["use"], "next": a["next"], "primary": a["primary"],
                             **{k: ((a["limits"] or {}).get(k) or {}).get("utilization")
                                for k in ("five_hour", "seven_day")}} for a in STATE["accts"]]
-    out["agents"] = live()["n"]
+    lv = live()
+    out["agents"], out["jobs"] = lv["n"], summary_jobs(lv.get("jobs") or [], lv["at"])
     d = data_for("w")
     out["week_cost_usd"] = round(d["total"], 2) if d["week"] else None
     return json.dumps(out)
@@ -3771,8 +3791,22 @@ def page_settings(q, sec=""):
     return layout(f"{title} · Usagecast", "/settings", s["period"], title, T(SUBS[sec]) if sec in SUBS else "", body, tabs=False, back=back)
 
 
+PROXY_TOKEN = os.environ.get("USAGECAST_PROXY_TOKEN", "")   # needed by requests that arrive through a Cloudflare tunnel
+
+
 class Handler(BaseHTTPRequestHandler):
     cookie = None
+
+    def parse_request(self):
+        """A request through Cloudflare (which always sets Cf-Connecting-Ip) needs USAGECAST_PROXY_TOKEN as Bearer; none
+        set means no way in from outside. Direct and tailnet requests stay as they are."""
+        if not super().parse_request():
+            return False
+        if self.headers.get("Cf-Connecting-Ip") is not None and not (PROXY_TOKEN and hmac.compare_digest(
+                self.headers.get("Authorization", "").encode(), ("Bearer " + PROXY_TOKEN).encode())):
+            self.send_error(403)
+            return False
+        return True
 
     def send(self, b, ctype, cache="no-cache"):
         self.send_response(200)
@@ -4073,6 +4107,7 @@ def selftest_v4():
         assert 'style="width:37.5%"' in cj and "38 %" in cj and 'href="/s/a?p=w"' in cj and "/job/r.img?a=&amp;v=" in cj
         assert "Sample 256/512" in cj and ">Done<" in cj and ">Stopped<" in cj and "background jobs: 3" in cj and "{" not in cj
         assert tr("live.left", d=dur(500)) in cj and cj.count("thumb") == 1
+        assert summary_jobs(J, t0) == [{"name": "Batch", "pct": 37, "eta_s": 500}], summary_jobs(J, t0)   # done/stopped left out
         big_ = job_row(J[0], "w", t0, True)
         assert 'class="shot"' in big_ and "href" not in big_ and "thumb" not in big_ and "{" not in big_
         (hp / "big.png").write_bytes(b"0" * (IMG_MAX + 1))
@@ -4628,6 +4663,18 @@ def selftest():
         pg = page_settings({}, "alerts")
         assert 'data-saved="Saved"' in pg and "data-bad=" in pg and "data-fail=" in pg and 'class="sr"' in pg
         SET.clear(); SET.update(keep); save_settings(dict(SET))
+        def via_cf(tok):   # a request as cloudflared forwards it
+            h = {"Cf-Connecting-Ip": "203.0.113.9", **({"Authorization": "Bearer " + tok} if tok else {})}
+            try:
+                return urllib.request.urlopen(urllib.request.Request(f"http://127.0.0.1:{srv.server_port}/health", headers=h), timeout=30).status
+            except urllib.error.HTTPError as err:
+                return err.code
+        global PROXY_TOKEN
+        pt0, PROXY_TOKEN = PROXY_TOKEN, ""
+        assert via_cf("") == 403 and via_cf("x") == 403   # no token set: nothing gets in through the tunnel
+        PROXY_TOKEN = "pt"
+        assert via_cf("") == 403 and via_cf("ptx") == 403 and via_cf("pt") == 200
+        PROXY_TOKEN = pt0
         def ingest(body, tok):
             req = urllib.request.Request(f"http://127.0.0.1:{srv.server_port}/api/ingest", body, {"Authorization": "Bearer " + tok} if tok else {})
             try:

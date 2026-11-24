@@ -33,7 +33,7 @@ Try it without Hermes: `python3 app.py --demo` starts it on a month of made-up d
 | `/wrapped` | A month or a year as story slides (see Wrapped below) |
 | `/projects` | Cost per project, tap one to see its sessions |
 | `/settings` | A short list with one page each: appearance, alerts, notifications, budget guard, advanced |
-| `/api/summary` | Limits, forecast, accounts and this limit week's cost as JSON, for widgets |
+| `/api/summary` | Limits, forecast, accounts, running jobs and this limit week's cost as JSON, for widgets |
 
 Period with `?p=w` (since the last weekly limit reset, default), `?p=1`, `?p=7`, `?p=30` or a custom range like
 `?p=2026-10-01..2026-10-07` (the "Custom" button).
@@ -240,6 +240,7 @@ PORT=7681 python3 app.py     # server on 127.0.0.1:7681
 | `USAGECAST_LANG` | Default language, `en` (default) or `de` |
 | `USAGECAST_NTFY` | ntfy target, if not taken from Hermes |
 | `USAGECAST_URL` | Default for the dashboard address in the settings, tapping an alert opens it |
+| `USAGECAST_PROXY_TOKEN` | Token a request through a Cloudflare tunnel must send as `Authorization: Bearer`; unset = no access that way |
 
 In the background the server measures the system prompt and tool descriptions once a day (`--snapshot`, runs in the
 Hermes venv) and fetches the subscription limits every 10 minutes through Hermes' OAuth login. The token never leaves
