@@ -33,7 +33,7 @@ Try it without Hermes: `python3 app.py --demo` starts it on a month of made-up d
 | `/wrapped` | A month or a year as story slides (see Wrapped below) |
 | `/projects` | Cost per project, tap one to see its sessions |
 | `/settings` | A short list with one page each: appearance, alerts, notifications, budget guard, advanced |
-| `/api/summary` | Limits, forecast, accounts, running jobs and this limit week's cost as JSON, for widgets |
+| `/api/summary` | Limits, forecast, accounts, running and just finished jobs, whether `louis-pc` is online in the tailnet (`pc`), what is down (`down`) and this limit week's cost as JSON, for widgets |
 
 Period with `?p=w` (since the last weekly limit reset, default), `?p=1`, `?p=7`, `?p=30` or a custom range like
 `?p=2026-10-01..2026-10-07` (the "Custom" button).

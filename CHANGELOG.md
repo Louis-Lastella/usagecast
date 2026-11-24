@@ -2,6 +2,15 @@
 
 Versions follow [Semantic Versioning](https://semver.org).
 
+## 3.16.0 - 2026-11-24
+
+- `/api/summary` gets `pc` (`true`/`false`, `null` if unknown): is `louis-pc` online in the tailnet, from
+  `tailscale status --json`. And `down`: short names of what is broken (`"Hermes"` when the gateway is not running,
+  `"Coolify"` when `coolify.lstlla.de/api/health` does not answer below 500), `[]` otherwise. A background thread
+  refreshes both every 60 s, so a request never waits for them.
+- `jobs` also lists up to two successfully finished jobs from the last 10 minutes with `"done": true`, after the
+  running ones. Failed and stopped jobs stay out.
+
 ## 3.15.0 - 2026-11-24
 
 - `/api/summary` lists up to three running background jobs as `jobs` (`name`, `pct`, `eta_s`), so a small display

@@ -32,7 +32,7 @@ Ohne Hermes ausprobieren: `python3 app.py --demo` startet es mit einem Monat erf
 | `/wrapped` | Ein Monat oder ein Jahr als Story-Folien (siehe Wrapped unten) |
 | `/projects` | Kosten pro Projekt, antippen zeigt die Sessions dazu |
 | `/settings` | Eine kurze Liste mit je einer Seite: Darstellung, Warnungen, Benachrichtigungen, Budget-Wächter, Erweitert |
-| `/api/summary` | Limits, Prognose, Konten, laufende Jobs und Kosten der Limit-Woche als JSON, für Widgets |
+| `/api/summary` | Limits, Prognose, Konten, laufende und gerade fertige Jobs, ob `louis-pc` im Tailnet online ist (`pc`), was ausgefallen ist (`down`) und Kosten der Limit-Woche als JSON, für Widgets |
 
 Zeitraum per `?p=w` (seit dem letzten Reset des Wochenlimits, Standard), `?p=1`, `?p=7`, `?p=30` oder ein eigener
 Zeitraum wie `?p=2026-10-01..2026-10-07` (Knopf „Eigener“).

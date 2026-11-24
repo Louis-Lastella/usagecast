@@ -1866,6 +1866,35 @@ def background():
         time.sleep(600)
 
 
+NET = {"pc": None, "coolify": None}   # last result of net_loop; the request path only reads this
+
+
+def pc_online(raw):
+    """True/False for the louis-pc peer in `tailscale status --json` output, None if unreadable or no such peer."""
+    try:
+        peers = json.loads(raw).get("Peer") or {}
+        return next((bool(p["Online"]) for p in peers.values() if str(p.get("HostName")).lower() == "louis-pc"), None)
+    except (AttributeError, KeyError, TypeError, ValueError):
+        return None
+
+
+def net_loop():
+    """Every 60 s: is louis-pc online in the tailnet, does Coolify answer (status < 500)."""
+    while True:
+        try:
+            NET["pc"] = pc_online(subprocess.run(["tailscale", "status", "--json"], capture_output=True, text=True, timeout=5).stdout)
+        except (OSError, subprocess.SubprocessError):
+            NET["pc"] = None
+        try:
+            with urllib.request.urlopen("https://coolify.lstlla.de/api/health", timeout=5):
+                NET["coolify"] = True
+        except urllib.error.HTTPError as ex:
+            NET["coolify"] = ex.code < 500
+        except (OSError, ValueError):
+            NET["coolify"] = False
+        time.sleep(60)
+
+
 def snapshot():
     """Runs in the Hermes venv: measures system prompt parts and tool schemas as Hermes currently sends them.
     It only builds Hermes' agent object and reads its prompt and tool list; no request goes to a model. The platform
@@ -2202,16 +2231,19 @@ def job_left(j, now):
 
 
 def summary_jobs(J, now):
-    """Running background jobs for /api/summary: at most 3 of {name, pct, eta_s}, finished ones left out."""
-    out = []
+    """Background jobs for /api/summary: up to 3 running {name, pct, eta_s}, then up to 2 that finished well in the
+    last 10 minutes with "done": true. Failed and stopped ones are left out."""
+    out, fin = [], []
     for j in J:
         g = j["prog"] or {}
-        if g.get("end"):
-            continue
         sh, left = g.get("share"), job_left(j, now)
-        out.append({"name": str(g.get("title") or g.get("name") or j["cmd"])[:40], "pct": None if sh is None else int(sh * 100),
-                    "eta_s": None if left is None else round(left)})
-    return out[:3]
+        row = {"name": str(g.get("title") or g.get("name") or j["cmd"])[:40], "pct": None if sh is None else int(sh * 100),
+               "eta_s": None if left is None else round(left)}
+        if not g.get("end"):
+            out.append(row)
+        elif g["end"] == "done" and now - g["at"] <= 600:
+            fin.append((g["at"], dict(row, done=True)))
+    return out[:3] + [r for _, r in sorted(fin, key=lambda x: -x[0])[:2]]
 
 
 def api_summary():
@@ -2240,6 +2272,8 @@ def api_summary():
                                for k in ("five_hour", "seven_day")}} for a in STATE["accts"]]
     lv = live()
     out["agents"], out["jobs"] = lv["n"], summary_jobs(lv.get("jobs") or [], lv["at"])
+    out["pc"] = NET["pc"]
+    out["down"] = (["Hermes"] if lv["up"] is False else []) + (["Coolify"] if NET["coolify"] is False else [])
     d = data_for("w")
     out["week_cost_usd"] = round(d["total"], 2) if d["week"] else None
     return json.dumps(out)
@@ -4107,7 +4141,17 @@ def selftest_v4():
         assert 'style="width:37.5%"' in cj and "38 %" in cj and 'href="/s/a?p=w"' in cj and "/job/r.img?a=&amp;v=" in cj
         assert "Sample 256/512" in cj and ">Done<" in cj and ">Stopped<" in cj and "background jobs: 3" in cj and "{" not in cj
         assert tr("live.left", d=dur(500)) in cj and cj.count("thumb") == 1
-        assert summary_jobs(J, t0) == [{"name": "Batch", "pct": 37, "eta_s": 500}], summary_jobs(J, t0)   # done/stopped left out
+        assert summary_jobs(J, t0) == [{"name": "Batch", "pct": 37, "eta_s": 500}, {"name": "Fin", "pct": 100, "eta_s": None, "done": True}]   # stopped left out
+        pj("ok2", title="Ok2", state="done", at=t0 - 599); pj("bad", title="Bad", state="failed", at=t0 - 5)
+        J2 = jobs(t0, [("", hp)])
+        assert summary_jobs(J2, t0) == [{"name": "Batch", "pct": 37, "eta_s": 500}, {"name": "Fin", "pct": 100, "eta_s": None, "done": True},
+                                        {"name": "Ok2", "pct": 100, "eta_s": None, "done": True}]   # newest finished first, summary_jobs(J2, t0)   # failed/stopped out
+        assert [j["name"] for j in summary_jobs(J2, t0 + 2)] == ["Batch", "Fin"]   # Ok2 is now older than 600 s
+        assert [r["name"] for r in summary_jobs(J, t0 + 541)] == ["Batch"]   # Fin is 601 s old
+        ts = lambda *p: json.dumps({"Peer": {f"k{i}": {"HostName": h, "Online": o} for i, (h, o) in enumerate(p)}})
+        assert pc_online(ts(("x", False), ("louis-pc", True))) is True and pc_online(ts(("louis-pc", False))) is False
+        assert pc_online(ts(("Louis-PC", True))) is True and pc_online(ts(("x", True))) is None and pc_online("{}") is None and pc_online("nope") is None and pc_online("") is None
+        assert pc_online("[]") is None and pc_online('{"Peer": {"a": 1}}') is None
         big_ = job_row(J[0], "w", t0, True)
         assert 'class="shot"' in big_ and "href" not in big_ and "thumb" not in big_ and "{" not in big_
         (hp / "big.png").write_bytes(b"0" * (IMG_MAX + 1))
@@ -4892,5 +4936,6 @@ if __name__ == "__main__":
     else:
         threading.Thread(target=background, daemon=True).start()
         threading.Thread(target=warm, daemon=True).start()
+        threading.Thread(target=net_loop, daemon=True).start()
         print(f"usagecast on http://127.0.0.1:{PORT}", flush=True)
         ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
