@@ -1918,32 +1918,36 @@ def background():
         time.sleep(600)
 
 
-NET = {"pc": None, "coolify": None}   # last result of net_loop; the request path only reads this
+PC_HOST = os.environ.get("USAGECAST_PC", "").strip().lower()   # tailnet machine /api/summary reports as `pc`
+WATCH = os.environ.get("USAGECAST_WATCH", "").strip().partition("=")   # "Name=https://host/health": `down` lists Name
+NET = {"pc": None, "up": None}   # last result of net_loop; the request path only reads this
 
 
-def pc_online(raw):
-    """True/False for the louis-pc peer in `tailscale status --json` output, None if unreadable or no such peer."""
+def pc_online(raw, host=None):
+    """True/False for the USAGECAST_PC peer in `tailscale status --json` output, None if unreadable, unset or no such peer."""
+    host = (host or PC_HOST).lower()
     try:
         peers = json.loads(raw).get("Peer") or {}
-        return next((bool(p["Online"]) for p in peers.values() if str(p.get("HostName")).lower() == "louis-pc"), None)
+        return next((bool(p["Online"]) for p in peers.values() if host and str(p.get("HostName")).lower() == host), None)
     except (AttributeError, KeyError, TypeError, ValueError):
         return None
 
 
 def net_loop():
-    """Every 60 s: is louis-pc online in the tailnet, does Coolify answer (status < 500)."""
+    """Every 60 s: is the USAGECAST_PC machine online in the tailnet, does the USAGECAST_WATCH address answer (< 500)."""
     while True:
         try:
-            NET["pc"] = pc_online(subprocess.run(["tailscale", "status", "--json"], capture_output=True, text=True, timeout=5).stdout)
+            NET["pc"] = pc_online(subprocess.run(["tailscale", "status", "--json"], capture_output=True, text=True, timeout=5).stdout) if PC_HOST else None
         except (OSError, subprocess.SubprocessError):
             NET["pc"] = None
-        try:
-            with urllib.request.urlopen("https://coolify.lstlla.de/api/health", timeout=5):
-                NET["coolify"] = True
-        except urllib.error.HTTPError as ex:
-            NET["coolify"] = ex.code < 500
-        except (OSError, ValueError):
-            NET["coolify"] = False
+        if WATCH[2]:
+            try:
+                with urllib.request.urlopen(WATCH[2], timeout=5):
+                    NET["up"] = True
+            except urllib.error.HTTPError as ex:
+                NET["up"] = ex.code < 500
+            except (OSError, ValueError):
+                NET["up"] = False
         time.sleep(60)
 
 
@@ -2325,7 +2329,7 @@ def api_summary():
     lv = live()
     out["agents"], out["jobs"] = lv["n"], summary_jobs(lv.get("jobs") or [], lv["at"])
     out["pc"] = NET["pc"]
-    out["down"] = (["Hermes"] if lv["up"] is False else []) + (["Coolify"] if NET["coolify"] is False else [])
+    out["down"] = (["Hermes"] if lv["up"] is False else []) + ([WATCH[0]] if WATCH[2] and NET["up"] is False else [])
     d = data_for("w")
     out["week_cost_usd"] = round(d["total"], 2) if d["week"] else None
     return json.dumps(out)
@@ -4211,9 +4215,10 @@ def selftest_v4():
         assert [j["name"] for j in summary_jobs(J2, t0 + 2)] == ["Batch", "Fin"]   # Ok2 is now older than 600 s
         assert [r["name"] for r in summary_jobs(J, t0 + 541)] == ["Batch"]   # Fin is 601 s old
         ts = lambda *p: json.dumps({"Peer": {f"k{i}": {"HostName": h, "Online": o} for i, (h, o) in enumerate(p)}})
-        assert pc_online(ts(("x", False), ("louis-pc", True))) is True and pc_online(ts(("louis-pc", False))) is False
-        assert pc_online(ts(("Louis-PC", True))) is True and pc_online(ts(("x", True))) is None and pc_online("{}") is None and pc_online("nope") is None and pc_online("") is None
-        assert pc_online("[]") is None and pc_online('{"Peer": {"a": 1}}') is None
+        assert pc_online(ts(("x", False), ("box-1", True)), "box-1") is True and pc_online(ts(("box-1", False)), "box-1") is False
+        assert pc_online(ts(("Box-1", True)), "BOX-1") is True and pc_online(ts(("x", True)), "box-1") is None and pc_online("{}", "box-1") is None
+        assert pc_online("nope", "box-1") is None and pc_online("", "box-1") is None and pc_online("[]", "box-1") is None
+        assert pc_online('{"Peer": {"a": 1}}', "box-1") is None and pc_online(ts(("", True)), "") is None
         big_ = job_row(J[0], "w", t0, True)
         assert 'class="shot"' in big_ and "href" not in big_ and "thumb" not in big_ and "{" not in big_
         (hp / "big.png").write_bytes(b"0" * (IMG_MAX + 1))

@@ -2,6 +2,11 @@
 
 Versions follow [Semantic Versioning](https://semver.org).
 
+## 3.17.1 - 2026-11-25
+
+- The machine behind `pc` and the service behind `down` come from `USAGECAST_PC` and `USAGECAST_WATCH`
+  (`Name=https://host/health`) instead of being written into the code; unset, `pc` is `null` and nothing is watched.
+
 ## 3.17.0 - 2026-11-25
 
 - New push channel Bark: your own bark-server with device key and optional login (Basic Auth). High alerts arrive as
@@ -11,9 +16,9 @@ Versions follow [Semantic Versioning](https://semver.org).
 
 ## 3.16.0 - 2026-11-24
 
-- `/api/summary` gets `pc` (`true`/`false`, `null` if unknown): is `louis-pc` online in the tailnet, from
+- `/api/summary` gets `pc` (`true`/`false`, `null` if unknown): is the desktop online in the tailnet, from
   `tailscale status --json`. And `down`: short names of what is broken (`"Hermes"` when the gateway is not running,
-  `"Coolify"` when `coolify.lstlla.de/api/health` does not answer below 500), `[]` otherwise. A background thread
+  a watched service when its health address does not answer below 500), `[]` otherwise. A background thread
   refreshes both every 60 s, so a request never waits for them.
 - `jobs` also lists up to two successfully finished jobs from the last 10 minutes with `"done": true`, after the
   running ones. Failed and stopped jobs stay out.

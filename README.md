@@ -33,7 +33,7 @@ Try it without Hermes: `python3 app.py --demo` starts it on a month of made-up d
 | `/wrapped` | A month or a year as story slides (see Wrapped below) |
 | `/projects` | Cost per project, tap one to see its sessions |
 | `/settings` | A short list with one page each: appearance, alerts, notifications, budget guard, advanced |
-| `/api/summary` | Limits, forecast, accounts, running and just finished jobs, whether `louis-pc` is online in the tailnet (`pc`), what is down (`down`) and this limit week's cost as JSON, for widgets |
+| `/api/summary` | Limits, forecast, accounts, running and just finished jobs, whether the `USAGECAST_PC` machine is online in the tailnet (`pc`), what is down (`down`) and this limit week's cost as JSON, for widgets |
 
 Period with `?p=w` (since the last weekly limit reset, default), `?p=1`, `?p=7`, `?p=30` or a custom range like
 `?p=2026-10-01..2026-10-07` (the "Custom" button).
@@ -247,6 +247,8 @@ PORT=7681 python3 app.py     # server on 127.0.0.1:7681
 | `USAGECAST_LANG` | Default language, `en` (default) or `de` |
 | `USAGECAST_NTFY` | ntfy target, if not taken from Hermes |
 | `USAGECAST_URL` | Default for the dashboard address in the settings, tapping an alert opens it |
+| `USAGECAST_PC` | Tailnet host name of a machine whose online state `/api/summary` reports as `pc` (unset: `null`) |
+| `USAGECAST_WATCH` | `Name=https://host/health`: `/api/summary` lists `Name` in `down` while that address fails or answers 5xx |
 | `USAGECAST_PROXY_TOKEN` | Token a request through a Cloudflare tunnel must send as `Authorization: Bearer`; unset = no access that way |
 
 In the background the server measures the system prompt and tool descriptions once a day (`--snapshot`, runs in the
