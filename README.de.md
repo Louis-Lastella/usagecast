@@ -191,6 +191,14 @@ das Topic und folgst den drei Schritten dort. „Test senden“ zeigt sofort die
 ntfy-Server mit Zugangs-Token geht auch, ebenso Hermes' ntfy-Kanal (`NTFY_HOME_CHANNEL`, `NTFY_SERVER_URL`, `NTFY_TOKEN`
 in `~/.hermes/.env`). `USAGECAST_NTFY` (volle URL mit Topic) setzt einen Standard ohne die Einstellungsseite.
 
+**Bark (iPhone):** „Bark“ schickt an deinen eigenen [bark-server](https://github.com/Finb/bark-server) und die Bark-App:
+Serveradresse, Geräteschlüssel und, falls der Server eine Anmeldung will, Benutzer und Passwort (Basic Auth; das Passwort
+wird nie wieder angezeigt). Prioritäten werden zu Bark-Stufen: hoch = `timeSensitive` (kommt durch den Fokus), normal =
+`active`, niedrig = `passive`; Antippen öffnet das Dashboard, alle Warnungen liegen in der Gruppe `usagecast`, der Text
+wird bei 2.500 Zeichen gekürzt. „Hermes-Kanal“ nimmt Bark, wenn Hermes darüber sendet (`BARK_URL`, `BARK_KEY`,
+`BARK_USER`, `BARK_PASS` in `~/.hermes/secrets/bark.env`), und fällt auf Hermes' ntfy-Kanal zurück, wenn Bark eine
+Nachricht nicht annimmt.
+
 ## Telegram-Mini-App
 
 Mit einem Hermes-Telegram-Bot läuft Usagecast auch in Telegram. Den Menü-Knopf des Bots per BotFather oder mit

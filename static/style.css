@@ -298,7 +298,7 @@ aside nav a.end{margin-top:auto}
 .chk input:disabled+span{color:var(--faint);cursor:not-allowed}
 .chk input:focus-visible+span{outline:2px solid var(--acc-ink);outline-offset:2px;border-radius:6px}
 /* rows that only matter for one choice; a browser without :has drops the rule and shows them all */
-.set:has([name=push][value=own]:not(:checked)) .ch-own,.set:has(#guard:not(:checked)) .gjobs{display:none}
+.set:has([name=push][value=own]:not(:checked)) .ch-own,.set:has([name=push][value=bark]:not(:checked)) .ch-bark,.set:has(#guard:not(:checked)) .gjobs{display:none}
 pre.cmd{margin:0 0 14px;padding:11px 14px;border-radius:10px;background:var(--tint);box-shadow:0 0 0 1px var(--line);font:12.5px/1.6 var(--mono);color:var(--ink2);white-space:pre-wrap;overflow-wrap:anywhere}
 .field{display:flex;justify-content:space-between;align-items:center;gap:8px 28px;padding:14px 0;border-top:1px solid var(--line)}
 .field>div:first-child{flex:1 1 260px;min-width:0}

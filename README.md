@@ -184,6 +184,13 @@ shown there. "Send test" shows the server's reply right away. Your own ntfy serv
 so does Hermes' ntfy channel (`NTFY_HOME_CHANNEL`, `NTFY_SERVER_URL`, `NTFY_TOKEN` in `~/.hermes/.env`).
 `USAGECAST_NTFY` (full URL with topic) sets a default without the settings page.
 
+**Bark (iPhone):** "Bark" pushes to your own [bark-server](https://github.com/Finb/bark-server) and the Bark app: server
+address, device key and, if the server wants a login, user and password (Basic Auth; the password is never shown again).
+Priorities map to Bark levels: high = `timeSensitive` (gets through Focus), normal = `active`, low = `passive`; the tap
+opens the dashboard, all alerts share the group `usagecast`, the text is cut at 2,500 characters. "Hermes' channel" takes
+Bark when Hermes pushes through it (`BARK_URL`, `BARK_KEY`, `BARK_USER`, `BARK_PASS` in `~/.hermes/secrets/bark.env`) and
+falls back to Hermes' ntfy channel when Bark does not accept a message.
+
 ## Telegram Mini App
 
 With a Hermes Telegram bot, Usagecast can live inside Telegram. Point the bot's menu button at the dashboard (an https

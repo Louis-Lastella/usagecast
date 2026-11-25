@@ -2,6 +2,13 @@
 
 Versions follow [Semantic Versioning](https://semver.org).
 
+## 3.17.0 - 2026-11-25
+
+- New push channel Bark: your own bark-server with device key and optional login (Basic Auth). High alerts arrive as
+  time-sensitive, normal ones active, low ones passive; a tap opens the dashboard.
+- "Hermes' channel" (was "Hermes' ntfy") pushes through Bark when Hermes uses Bark (`secrets/bark.env`) and falls back
+  to Hermes' ntfy channel when Bark does not take a message.
+
 ## 3.16.0 - 2026-11-24
 
 - `/api/summary` gets `pc` (`true`/`false`, `null` if unknown): is `louis-pc` online in the tailnet, from

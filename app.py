@@ -10,7 +10,7 @@ moment: tools, skills, plugins, system prompt parts, thinking, cache rebuilds af
   python3 app.py --ntfy-test              send a test alert
   <hermes-venv>/python app.py --snapshot  measure system prompt parts and tool schemas (the server does this daily)
 """
-import bisect, copy, glob, gzip, hmac, html, json, math, os, random, re, secrets, shutil, sqlite3, statistics, subprocess, sys, tempfile, threading, time, traceback, urllib.error, urllib.request
+import base64, bisect, copy, glob, gzip, hmac, html, json, math, os, random, re, secrets, shutil, sqlite3, statistics, subprocess, sys, tempfile, threading, time, traceback, urllib.error, urllib.request
 from collections import Counter, defaultdict
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
@@ -111,15 +111,17 @@ DEFAULTS = {
     "guard": False, "guard_jobs": [], "ingest_token": "",
     "quiet": False, "quiet_from": "22:00", "quiet_to": "07:00",
     "push": "own" if _TOPIC else "off", "ntfy_server": _SRV, "ntfy_topic": _TOPIC, "ntfy_token": "", "url": PUBLIC_URL,
+    "bark_url": "", "bark_key": "", "bark_user": "", "bark_pass": "",
     "tg_bot": "off", "tg_thread": "", "tg_menu": True, "tg_pin": True, "pet": "terminal",
 }
 CHOICES = {"theme": ("system", "light", "dark"), "lang": tuple(LOC), "currency": ("USD", "EUR"), "numbers": ("compact", "full"),
-           "period": tuple(PERIODS), "limit_view": ("used", "left"), "cost_unit": ("money", "week"), "push": ("off", "own", "hermes", "telegram"),
+           "period": tuple(PERIODS), "limit_view": ("used", "left"), "cost_unit": ("money", "week"), "push": ("off", "own", "hermes", "bark", "telegram"),
            "pet": ("off", *PETS)}
 RANGES = {"five_min": (5, 240), "chat_pct": (0.1, 50.0), "spike_pct": (0.5, 50.0)}
 URL_RX = r"https?://[^\s\"'<>]+"
 HHMM = r"([01]\d|2[0-3]):[0-5]\d"
 FORMATS = {"tg_thread": r"\d{0,12}", "quiet_from": HHMM, "quiet_to": HHMM, "ntfy_topic": r"[A-Za-z0-9_-]{1,64}", "ntfy_server": URL_RX, "url": f"({URL_RX})?",
+           "bark_url": f"({URL_RX})?", "bark_key": r"[A-Za-z0-9_-]{0,64}", "bark_user": r"[^\s:]{0,64}",
            "extra_steps": r"(\d+(\.\d+)?(\s*[,; ]\s*\d+(\.\d+)?)*)?"}
 # Sub-pages of /settings and the keys each one saves: a form changes only its own section, so a checkbox missing from
 # one page never switches off a setting of another. Every key of DEFAULTS is in exactly one section (selftest).
@@ -127,7 +129,7 @@ SECTIONS = {
     "look": ("theme", "lang", "currency", "numbers", "period", "limit_view", "cost_unit", "pet"),
     "alerts": ("alert_five", "five_min", "alert_week", "alert_free", "alert_steps", "alert_extra", "extra_steps", "alert_chat", "chat_pct",
                "alert_spike", "spike_pct", "alert_digest", "quiet", "quiet_from", "quiet_to"),
-    "notify": ("push", "ntfy_topic", "tg_bot", "tg_thread", "tg_menu", "tg_pin"),
+    "notify": ("push", "ntfy_topic", "bark_url", "bark_key", "bark_user", "bark_pass", "tg_bot", "tg_thread", "tg_menu", "tg_pin"),
     "budget": ("guard", "guard_jobs"),
     "advanced": ("ingest_token", "source", "ntfy_server", "ntfy_token", "url"),
 }
@@ -253,8 +255,8 @@ def clean(form, cur, keys=DEFAULTS):
         elif k == "guard_jobs":
             ids = [j["id"] for j in cron_list()]
             s[k] = [j for j in ids if "gj_" + j in form] if ids else s[k]   # unreadable jobs.json: keep the marks
-        elif k == "ntfy_token":
-            s[k] = "" if "token_clear" in form else v or s[k]   # empty field = keep the saved token
+        elif k in ("ntfy_token", "bark_pass"):   # empty field = keep the saved secret
+            s[k] = "" if ("token_clear" if k == "ntfy_token" else "bark_pass_clear") in form else v[:256] or s[k]
         elif k in form and re.fullmatch(FORMATS[k], v):
             s[k] = v.rstrip("/")
     return s
@@ -1580,7 +1582,52 @@ def tg_open(t, path="/"):
 
 
 def push_on():
-    return bool(tg_target()) if SET["push"] == "telegram" else bool(ntfy_target())
+    return bool(tg_target()) if SET["push"] == "telegram" else bool(bark_target() or ntfy_target())
+
+
+BARK_LEVEL, BARK_MAX = {4: "timeSensitive", 3: "active"}, 2500   # other priorities: passive; body limit from the APNs payload
+
+
+def hermes_bark(home=HERMES):
+    """(url, device key, user, password) of the Bark server Hermes itself pushes to (secrets/bark.env), otherwise None."""
+    try:
+        env = dict(x.strip().split("=", 1) for x in (home / "secrets" / "bark.env").read_text().splitlines() if "=" in x)
+    except (OSError, ValueError):
+        return None
+    env = {k.strip(): v.strip().strip("'\"") for k, v in env.items()}
+    if not (env.get("BARK_URL") and env.get("BARK_KEY")):
+        return None
+    return env["BARK_URL"].rstrip("/"), env["BARK_KEY"], env.get("BARK_USER", ""), env.get("BARK_PASS", "")
+
+
+def bark_target():
+    """(url, device key, user, password) of the Bark server to push to: the own one, Hermes' one, or None."""
+    if SET["push"] == "hermes":
+        return hermes_bark()
+    if SET["push"] == "bark" and SET["bark_url"] and SET["bark_key"]:
+        return SET["bark_url"], SET["bark_key"], SET["bark_user"], SET["bark_pass"]
+    return None
+
+
+def send_bark(t, title, text, prio, path=""):
+    """(sent, the server's reply) of one Bark push; sent only when Bark answers code 200."""
+    url, key, user, pw = t
+    body = {"device_key": key, "title": title, "body": text[:BARK_MAX] or " ", "level": BARK_LEVEL.get(prio, "passive"),
+            "group": "usagecast", **({"url": SET["url"] + path} if SET["url"] else {})}
+    headers = {"Content-Type": "application/json; charset=utf-8",
+               **({"Authorization": "Basic " + base64.b64encode(f"{user}:{pw}".encode()).decode()} if user or pw else {})}
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url + "/push", json.dumps(body).encode(), headers), timeout=15) as r:
+            raw = r.read(400).decode("utf-8", "replace").strip()
+    except urllib.error.HTTPError as err:
+        return False, f"{err.code} {err.read(400).decode('utf-8', 'replace').strip()}"
+    except OSError as err:
+        return False, str(getattr(err, "reason", "")) or type(err).__name__
+    try:
+        ok = json.loads(raw).get("code") == 200
+    except (ValueError, AttributeError):
+        ok = False
+    return ok, f"{200 if ok else 502} {raw}"
 
 
 def hermes_ntfy():
@@ -1609,6 +1656,11 @@ def send_push(title, text, prio=4, path=""):
         ok, r = tg_call("sendMessage", chat_id=t[1], **({"message_thread_id": int(t[2])} if t[2] else {}), parse_mode="HTML",
                         text=f"<b>{html.escape(title)}</b>\n{html.escape(text)}", disable_notification=prio <= 2, **tg_open(t, path))
         return ok, "200 OK" if ok else r
+    b = bark_target()
+    if b:
+        ok, r = send_bark(b, title, text, prio, path)
+        if ok or SET["push"] != "hermes" or not hermes_ntfy():   # hermes: Bark did not take it, Hermes' ntfy does
+            return ok, r
     t = ntfy_target()
     if not t:
         return False, tr("set.push.state.off")
@@ -1627,7 +1679,7 @@ def send_push(title, text, prio=4, path=""):
 def notify(title, text, prio=4, path=""):
     ok, reply = send_push(title, text, prio, path)
     if not ok:
-        print("ntfy:", reply, flush=True)
+        print("push:", reply, flush=True)
     return ok
 
 
@@ -3717,11 +3769,12 @@ def set_alerts(s, done):
 
 def set_notify(s, done):
     host = urlparse(s["ntfy_server"]).netloc
-    hermes_ok, tg_ok = hermes_ntfy() is not None, bool(tg_target())
+    hermes_ok, tg_ok = bool(hermes_bark() or hermes_ntfy()), bool(tg_target())
     bots = [(n or "hermes", e(agent_label(n))) for n, h in [("", HERMES), *((x, HERMES / "profiles" / x) for x in profiles())]
             if hermes_env("TELEGRAM_BOT_TOKEN", h)]
     chan = checks("push", T("via"), [("off", T("via.off"), "", False), ("own", T("via.own"), tr("set.via.own.why", server=e(host)), False),
                            ("hermes", T("via.hermes"), T("via.hermes.why" if hermes_ok else "via.nohermes"), not hermes_ok),
+                           ("bark", T("via.bark"), T("via.bark.why"), False),
                            ("telegram", T("via.telegram"), T("via.tg.why" if tg_ok else "via.notg"), not tg_ok)])
     if not s["ntfy_topic"]:
         own = field("setup", T("setup"), f'<button class="btn primary" id="setup" name="action" value="setup">{T("setup.btn")}</button>', T("setup.why"))
@@ -3735,6 +3788,15 @@ def set_notify(s, done):
                + field("android", T("subscribe"), f'<a class="btn" id="android" href="{e(android)}">{T("android")}</a>', ios)
                + field("newtopic", T("newtopic"), f'<button class="btn" id="newtopic" name="action" value="newtopic"'
                        f' data-q="{e(T("newtopic.confirm"))}" onclick="return confirm(this.dataset.q)">{T("newtopic.btn")}</button>', T("newtopic.why")))
+    bpw = (f'<input type="password" id="bark_pass" name="bark_pass" placeholder="{T("token.saved") if s["bark_pass"] else ""}"'
+           f' autocomplete="new-password">' + (f'<label class="why"><input type="checkbox" name="bark_pass_clear"> {T("bark.pass.clear")}</label>'
+                                               if s["bark_pass"] else ""))
+    mono = ' class="mono" spellcheck="false" autocomplete="off" autocapitalize="off"'
+    bark = (field("bark_url", T("bark.url"), f'<input type="url" id="bark_url" name="bark_url" value="{e(s["bark_url"])}" class="wide" placeholder="https://">',
+                  T("bark.url.why"))
+            + field("bark_key", T("bark.key"), f'<input id="bark_key" name="bark_key" value="{e(s["bark_key"])}" maxlength="64"{mono}>', T("bark.key.why"))
+            + field("bark_user", T("bark.user"), f'<input id="bark_user" name="bark_user" value="{e(s["bark_user"])}" maxlength="64"{mono}>', T("bark.user.why"))
+            + field("bark_pass", T("bark.pass"), bpw, T("bark.pass.why")))
     test = field("test", T("test"), f'<button class="btn" id="test" name="action" value="test">{T("test.btn")}</button>', T("test.why")) if push_on() else ""
     tgc = (field("tg_bot", T("tg.bot"), select("tg_bot", [("off", T("tg.bot.off")), *bots], s["tg_bot"]), T("tg.bot.why" if bots else "tg.nobot"))
            + field("tg_thread", T("tg.thread"), f'<input id="tg_thread" name="tg_thread" value="{e(s["tg_thread"])}" inputmode="numeric"'
@@ -3742,7 +3804,7 @@ def set_notify(s, done):
            + field("tg_menu", T("tg.menu"), check("tg_menu"), T("tg.menu.why")) + field("tg_pin", T("tg.pin"), check("tg_pin"), T("tg.pin.why"))
            + f'<p><button type="button" class="btn" id="tg-home" hidden>{T("tg.home")}</button></p>')   # static/app.js shows it in Telegram
     # The own-topic rows show only while "own topic" is ticked (CSS :has, so no JS; without :has they always show)
-    return card("chan", T("via"), chan + f'<div class="ch-own">{own}</div>' + test) + card("tg", T("tg"), tgc, T("tg.hint"))
+    return card("chan", T("via"), chan + f'<div class="ch-own">{own}</div><div class="ch-bark">{bark}</div>' + test) + card("tg", T("tg"), tgc, T("tg.hint"))
 
 
 def set_budget(s, done):
@@ -3802,7 +3864,7 @@ def page_settings(q, sec=""):
     note = ""
     if done == "test" and time.time() - LAST_PUSH.get("at", 0) < 600:
         note = tr("set.test.ok" if LAST_PUSH["ok"] else "set.test.fail", reply=f'<code>{e(LAST_PUSH["reply"])}</code>')
-        fail, code = not LAST_PUSH["ok"] and ntfy_target(), LAST_PUSH["reply"][:3]
+        fail, code = not LAST_PUSH["ok"] and (bark_target() or ntfy_target()), LAST_PUSH["reply"][:3]
         if fail and code in ("401", "403"):
             note += " " + T("test.auth")
         elif fail and not code.isdigit():
@@ -3810,7 +3872,7 @@ def page_settings(q, sec=""):
     elif done in ("save", "setup", "newtopic", "useurl"):
         note = T("done." + done)
     note = f'<p class="note" role="status">{note}</p>' if note else ""
-    names = {"ntfy_topic": "topic", "ntfy_server": "server.url", "url": "url", "quiet_from": "quiet.from", "quiet_to": "quiet.to",
+    names = {"ntfy_topic": "topic", "ntfy_server": "server.url", "bark_url": "bark.url", "bark_key": "bark.key", "bark_user": "bark.user", "url": "url", "quiet_from": "quiet.from", "quiet_to": "quiet.to",
              "extra_steps": "a.extra.steps", "tg_thread": "tg.thread"}
     bad = [T(names[k]) for k in (q.get("bad") or [""])[0].split(",") if k in names]
     if bad:
@@ -4287,9 +4349,97 @@ def selftest_wrapped():
     CACHE.clear(); WRAP.clear(); WRAPPING.clear()
 
 
+def selftest_bark():
+    """Bark: payload, Basic Auth, levels, body cut, code 200 only; Hermes' bark.env; hermes mode falls back to ntfy."""
+    got = []
+
+    class Fake(BaseHTTPRequestHandler):
+        def do_POST(self):
+            got.append((self.path, self.headers.get("Authorization"), json.loads(self.rfile.read(int(self.headers["Content-Length"])))))
+            code, out = (200, {"code": 200}) if got[-1][2]["device_key"] == "K" else (400, {"code": 400, "message": "failed to get device token"})
+            b = json.dumps(out).encode()
+            self.send_response(code)
+            self.send_header("Content-Length", str(len(b)))
+            self.end_headers()
+            self.wfile.write(b)
+
+        def log_message(self, *a):
+            pass
+
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), Fake)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base, old = f"http://127.0.0.1:{srv.server_port}", dict(SET)
+    try:
+        SET.update(push="bark", bark_url=base, bark_key="K", bark_user="u", bark_pass="p", url="https://dash.example")
+        assert push_on() and send_push("T", "x" * 3000, 4, "/s/1") == (True, '200 {"code": 200}')
+        path, auth, b = got[-1]
+        assert path == "/push" and auth == "Basic " + base64.b64encode(b"u:p").decode()
+        assert (b["title"], len(b["body"]), b["level"], b["group"], b["url"]) == ("T", BARK_MAX, "timeSensitive", "usagecast", "https://dash.example/s/1")
+        assert [send_bark(bark_target(), "t", "", q)[0] and got[-1][2]["level"] for q in (3, 2)] == ["active", "passive"] and got[-1][2]["body"] == " "
+        SET.update(bark_user="", bark_pass="", url="")
+        assert send_push("t", "m", 3)[0] and got[-1][1] is None and "url" not in got[-1][2]
+        SET["bark_key"] = "bad"
+        ok, reply = send_push("t", "m", 3)
+        assert not ok and reply.startswith("400 "), reply
+        SET["bark_url"] = ""
+        assert bark_target() is None and not push_on() and send_push("t", "m")[0] is False
+        with tempfile.TemporaryDirectory() as tdir:   # Hermes' Bark, and hermes mode falling back to Hermes' ntfy
+            h = Path(tdir)
+            assert hermes_bark(h) is None
+            (h / "secrets").mkdir()
+            (h / "secrets" / "bark.env").write_text(f"BARK_URL={base}/\nBARK_USER=hu\nBARK_PASS='hp'\nBARK_KEY=K\n")
+            assert hermes_bark(h) == (base, "K", "hu", "hp")
+            (h / "secrets" / "bark.env").write_text(f"BARK_URL={base}\n")
+            assert hermes_bark(h) is None
+        g = globals()
+        hb, hn, sent = g["hermes_bark"], g["hermes_ntfy"], []
+
+        class Ntfy(BaseHTTPRequestHandler):
+            def do_POST(self):
+                sent.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
+                self.send_response(200)
+                self.send_header("Content-Length", "2")
+                self.end_headers()
+                self.wfile.write(b"{}")
+
+            def log_message(self, *a):
+                pass
+
+        nsrv = ThreadingHTTPServer(("127.0.0.1", 0), Ntfy)
+        threading.Thread(target=nsrv.serve_forever, daemon=True).start()
+        try:
+            g["hermes_ntfy"] = lambda: (f"http://127.0.0.1:{nsrv.server_port}", "topic", None)
+            SET["push"] = "hermes"
+            g["hermes_bark"] = lambda home=HERMES: (base, "K", "", "")
+            n = len(got)
+            assert send_push("t", "m", 3)[0] and len(got) == n + 1 and not sent   # Bark took it
+            g["hermes_bark"] = lambda home=HERMES: (base, "bad", "", "")
+            assert send_push("t", "m", 3)[0] and sent and sent[-1]["topic"] == "topic"   # Bark refused: ntfy
+            g["hermes_bark"] = lambda home=HERMES: None
+            assert push_on() and send_push("t", "m", 3)[0] and len(sent) == 2   # no Bark in Hermes: ntfy as before
+        finally:
+            g["hermes_bark"], g["hermes_ntfy"] = hb, hn
+            nsrv.shutdown()
+        cur = {**SET, "bark_pass": "old"}   # the password field: empty keeps, the clear box removes, never echoed
+        assert clean({"bark_pass": ""}, cur, SECTIONS["notify"])["bark_pass"] == "old"
+        assert clean({"bark_pass": "new"}, cur, SECTIONS["notify"])["bark_pass"] == "new"
+        assert clean({"bark_pass_clear": "1"}, cur, SECTIONS["notify"])["bark_pass"] == ""
+        c = clean({"bark_url": "javascript:x", "bark_key": "a b", "bark_user": "a:b"}, {**cur, "bark_url": "https://b.example"}, SECTIONS["notify"])
+        assert (c["bark_url"], c["bark_key"], c["bark_user"]) == ("https://b.example", cur["bark_key"], cur["bark_user"])
+        _req.lang = "en"
+        SET.update(push="bark", bark_pass="secret-pw")
+        page = page_settings({}, "notify")
+        assert 'value="bark"' in page and 'class="ch-bark"' in page and "secret-pw" not in page and 'name="bark_pass_clear"' in page
+    finally:
+        SET.clear()
+        SET.update(old)
+        srv.shutdown()
+
+
 def selftest():
     selftest_v4()
     selftest_chats()
+    selftest_bark()
     global HERMES, DATA, CLAUDE
     SET.clear(); SET.update(DEFAULTS); FX.clear(); FC.clear()   # the installed settings must not change the expected formats
     selftest_wrapped()
