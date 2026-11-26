@@ -2,6 +2,10 @@
 
 Versions follow [Semantic Versioning](https://semver.org).
 
+## 3.17.2 - 2026-11-26
+
+- Fixed: the louis-pc and watched-service check in /api/summary froze after the first minute (its env variable shared the name `WATCH` with the config watch list, the check thread crashed), so `pc` stayed `true` while the PC was off and `down` never changed. Renamed to `NET_WATCH`; the selftest guards it.
+
 ## 3.17.1 - 2026-11-25
 
 - The machine behind `pc` and the service behind `down` come from `USAGECAST_PC` and `USAGECAST_WATCH`

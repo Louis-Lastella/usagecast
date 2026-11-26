@@ -1919,7 +1919,7 @@ def background():
 
 
 PC_HOST = os.environ.get("USAGECAST_PC", "").strip().lower()   # tailnet machine /api/summary reports as `pc`
-WATCH = os.environ.get("USAGECAST_WATCH", "").strip().partition("=")   # "Name=https://host/health": `down` lists Name
+NET_WATCH = os.environ.get("USAGECAST_WATCH", "").strip().partition("=")   # "Name=https://host/health": `down` lists Name
 NET = {"pc": None, "up": None}   # last result of net_loop; the request path only reads this
 
 
@@ -1940,9 +1940,9 @@ def net_loop():
             NET["pc"] = pc_online(subprocess.run(["tailscale", "status", "--json"], capture_output=True, text=True, timeout=5).stdout) if PC_HOST else None
         except (OSError, subprocess.SubprocessError):
             NET["pc"] = None
-        if WATCH[2]:
+        if NET_WATCH[2]:
             try:
-                with urllib.request.urlopen(WATCH[2], timeout=5):
+                with urllib.request.urlopen(NET_WATCH[2], timeout=5):
                     NET["up"] = True
             except urllib.error.HTTPError as ex:
                 NET["up"] = ex.code < 500
@@ -2329,7 +2329,7 @@ def api_summary():
     lv = live()
     out["agents"], out["jobs"] = lv["n"], summary_jobs(lv.get("jobs") or [], lv["at"])
     out["pc"] = NET["pc"]
-    out["down"] = (["Hermes"] if lv["up"] is False else []) + ([WATCH[0]] if WATCH[2] and NET["up"] is False else [])
+    out["down"] = (["Hermes"] if lv["up"] is False else []) + ([NET_WATCH[0]] if NET_WATCH[2] and NET["up"] is False else [])
     d = data_for("w")
     out["week_cost_usd"] = round(d["total"], 2) if d["week"] else None
     return json.dumps(out)
@@ -4219,6 +4219,7 @@ def selftest_v4():
         assert pc_online(ts(("Box-1", True)), "BOX-1") is True and pc_online(ts(("x", True)), "box-1") is None and pc_online("{}", "box-1") is None
         assert pc_online("nope", "box-1") is None and pc_online("", "box-1") is None and pc_online("[]", "box-1") is None
         assert pc_online('{"Peer": {"a": 1}}', "box-1") is None and pc_online(ts(("", True)), "") is None
+        assert isinstance(NET_WATCH[2], str), "NET_WATCH shadowed: net_loop would die on its first round"
         big_ = job_row(J[0], "w", t0, True)
         assert 'class="shot"' in big_ and "href" not in big_ and "thumb" not in big_ and "{" not in big_
         (hp / "big.png").write_bytes(b"0" * (IMG_MAX + 1))
