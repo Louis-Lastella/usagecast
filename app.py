@@ -704,7 +704,7 @@ def analyze(c, since, snap, ttl, sid=None, logs=None, until=math.inf):
     chats = chat_index(c)
     msgs = defaultdict(list)
     for r in c.execute(f"""select session_id, role, content, api_content, tool_name, tool_calls, tool_call_id,
-            timestamp, reasoning from messages where session_id in ({q}) order by session_id, id""", ids):
+            cast(timestamp as real), reasoning from messages where session_id in ({q}) order by session_id, id""", ids):
         msgs[r[0]].append(r[1:])
 
     hourly = sid is None and min(until, time.time()) - since < 2 * 86400
@@ -2205,7 +2205,7 @@ def live(now=None, hs=None):
                                  (now - LIVE_MAX,)).fetchall()
                 ci = chat_index(c) if rows else {}
                 for sid, src, title, parent, what, started, model, i, r, w, o in rows:
-                    turn = c.execute("select max(timestamp) from messages where session_id = ? and role = 'user'", (sid,)).fetchone()[0]
+                    turn = c.execute("select max(cast(timestamp as real)) from messages where session_id = ? and role = 'user'", (sid,)).fetchone()[0]
                     plat, ch = ci.get(sid, (src, NOCHAT))
                     runs.append(dict(id=sid, agent=a, src=src, platform=plat, chat=ch, title=title, parent=parent, what=what, since=turn or started or now, model=model_name(model),
                                      cost=sum(row_cost(model or "", i or 0, r or 0, w or 0, o or 0, ttl))))
@@ -3262,8 +3262,8 @@ def day_costs():
     for sid, model, i, r, w, o in c.execute("""select session_id, model, input_tokens, cache_read_tokens, cache_write_tokens,
             output_tokens from session_model_usage where model like 'claude%'"""):
         cost[sid] += sum(row_cost(model, i, r, w, o, ttl))
-    for sid, day, n in c.execute("""select session_id, date(timestamp, 'unixepoch', 'localtime'), count(*) from messages
-            where timestamp >= ? group by 1, 2""", (since,)):
+    for sid, day, n in c.execute("""select session_id, date(cast(timestamp as real), 'unixepoch', 'localtime'), count(*) from messages
+            where cast(timestamp as real) >= ? group by 1, 2""", (since,)):
         spread[sid][day] = n
     first = datetime.fromtimestamp(since).date().isoformat()
     start = {sid: day for sid, day in c.execute("select id, date(started_at, 'unixepoch', 'localtime') from sessions") if day and day >= first}
@@ -4047,6 +4047,9 @@ def test_db(base=0.0):
                     ("c", "", 2, 5, 1000, 800, 50, base + 500)])
     db.executemany("""insert into messages(session_id, role, content, api_content, tool_name, tool_calls, tool_call_id,
         timestamp, reasoning) values('s', ?, ?, ?, ?, ?, ?, ?, ?)""", msgs)
+    # a real state.db had one timestamp mangled to text by a secret scrub ("1788523915.***"), it broke /history
+    db.execute("""update messages set timestamp = printf('%d.***', timestamp)
+        where rowid = (select max(rowid) from messages where timestamp = cast(timestamp as integer))""")
     db.commit()  # an open transaction would make backup() wait forever
     return db, msgs
 

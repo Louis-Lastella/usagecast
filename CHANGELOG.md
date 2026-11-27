@@ -5,6 +5,8 @@ Versions follow [Semantic Versioning](https://semver.org).
 ## 3.17.3 - 2026-11-27
 
 - The homelab mascot's fans spin five times faster (calm 0.8 s, busy 0.4 s, tight 0.2 s per turn).
+- Fixed: History answered 500 when a message in state.db had its timestamp stored as text (a secret scrub had turned
+  the decimals into `***`). Timestamps are read as numbers everywhere now.
 
 ## 3.17.2 - 2026-11-26
 
