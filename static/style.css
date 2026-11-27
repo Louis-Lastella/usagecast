@@ -141,7 +141,7 @@ svg.spark .w{stroke:var(--acc)}svg.spark .fcl{stroke:var(--acc);stroke-dasharray
 @keyframes pet-pulse{50%{opacity:.35}}.pet-pulse{animation:pet-pulse 2s ease-in-out infinite}
 @keyframes pet-code{to{transform:translateY(-48px)}}.pet-code{animation:pet-code 2s linear infinite}
 @keyframes pet-wave{to{transform:translateX(-32px)}}.pet-wave{animation:pet-wave 2s linear infinite}
-@keyframes pet-spin{to{transform:rotate(360deg)}}.pet-fan3{animation:pet-spin 4s linear infinite}.pet-fan2{animation:pet-spin 2s linear infinite}.pet-fan1{animation:pet-spin 1s linear infinite}
+@keyframes pet-spin{to{transform:rotate(360deg)}}.pet-fan3{animation:pet-spin .8s linear infinite}.pet-fan2{animation:pet-spin .4s linear infinite}.pet-fan1{animation:pet-spin .2s linear infinite}
 @keyframes pet-gear{to{transform:rotate(45deg)}}.pet-gear{animation:pet-gear 1s linear infinite}
 @keyframes pet-pkt{to{stroke-dashoffset:-14}}.pet-pkt2{animation:pet-pkt 2s linear infinite}.pet-pkt1{animation:pet-pkt 1s linear infinite}
 @keyframes pet-rise{0%{transform:translateY(4px);opacity:0}40%{opacity:1}100%{transform:translateY(-10px);opacity:0}}.pet-heat,.pet-steam1{animation:pet-rise 1s ease-out infinite}.pet-steam2{animation:pet-rise 2s ease-out infinite}

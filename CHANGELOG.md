@@ -2,6 +2,10 @@
 
 Versions follow [Semantic Versioning](https://semver.org).
 
+## 3.17.3 - 2026-11-27
+
+- The homelab mascot's fans spin five times faster (calm 0.8 s, busy 0.4 s, tight 0.2 s per turn).
+
 ## 3.17.2 - 2026-11-26
 
 - Fixed: the louis-pc and watched-service check in /api/summary froze after the first minute (its env variable shared the name `WATCH` with the config watch list, the check thread crashed), so `pc` stayed `true` while the PC was off and `down` never changed. Renamed to `NET_WATCH`; the selftest guards it.
